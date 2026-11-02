@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coasther API</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@300;400;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Sora', sans-serif;
+            background: #0a0f1a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            padding: 3rem 1.5rem;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(56, 189, 248, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(56, 189, 248, 0.04) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            top: -20%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 600px;
+            background: radial-gradient(ellipse, rgba(56, 189, 248, 0.07) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+            animation: fadeUp 0.5s ease both;
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header {
+            margin-bottom: 2.5rem;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(56, 189, 248, 0.08);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 999px;
+            padding: 5px 14px;
+            font-size: 11px;
+            font-family: 'DM Mono', monospace;
+            color: #38bdf8;
+            letter-spacing: 0.06em;
+            margin-bottom: 1.5rem;
+        }
+
+        .badge-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #38bdf8;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.35;
+                transform: scale(0.75);
+            }
+        }
+
+        .logo-label {
+            font-size: 12px;
+            font-family: 'DM Mono', monospace;
+            color: #3f4f65;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 0.75rem;
+        }
+
+        h1 {
+            font-size: clamp(2.2rem, 5vw, 3.4rem);
+            font-weight: 700;
+            line-height: 1.1;
+            letter-spacing: -0.03em;
+            margin-bottom: 1rem;
+        }
+
+        h1 span {
+            background: linear-gradient(135deg, #38bdf8 0%, #818cf8 55%, #c084fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .desc {
+            font-size: 0.95rem;
+            color: #8899aa;
+            line-height: 1.75;
+            font-weight: 300;
+            max-width: 520px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 2.5rem;
+        }
+
+        .stat {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 12px;
+            padding: 14px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #e2e8f0;
+            display: block;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            color: #3f4f65;
+            margin-top: 4px;
+            font-family: 'DM Mono', monospace;
+            letter-spacing: 0.05em;
+        }
+
+        .section {
+            margin-bottom: 2rem;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .section-label {
+            font-size: 10px;
+            font-family: 'DM Mono', monospace;
+            color: #3f4f65;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .section-line {
+            flex: 1;
+            height: 1px;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .endpoints {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .endpoint {
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            padding: 11px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: background 0.15s, border-color 0.15s, transform 0.15s;
+        }
+
+        .endpoint:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(56, 189, 248, 0.18);
+            transform: translateX(3px);
+        }
+
+        .methods {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        .method {
+            font-family: 'DM Mono', monospace;
+            font-size: 10px;
+            font-weight: 500;
+            padding: 2px 7px;
+            border-radius: 5px;
+            white-space: nowrap;
+        }
+
+        .get {
+            background: rgba(34, 197, 94, 0.10);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.18);
+        }
+
+        .post {
+            background: rgba(56, 189, 248, 0.10);
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.18);
+        }
+
+        .put {
+            background: rgba(251, 191, 36, 0.10);
+            color: #fbbf24;
+            border: 1px solid rgba(251, 191, 36, 0.18);
+        }
+
+        .patch {
+            background: rgba(168, 85, 247, 0.10);
+            color: #c084fc;
+            border: 1px solid rgba(168, 85, 247, 0.18);
+        }
+
+        .delete {
+            background: rgba(239, 68, 68, 0.10);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.18);
+        }
+
+        .path {
+            font-family: 'DM Mono', monospace;
+            font-size: 12.5px;
+            color: #cbd5e1;
+            flex: 1;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .path-desc {
+            font-size: 11px;
+            color: #3f4f65;
+            flex-shrink: 0;
+        }
+
+        .footer {
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            padding-top: 1.5rem;
+            margin-top: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .footer-left {
+            font-size: 11px;
+            color: #2a3a50;
+            font-family: 'DM Mono', monospace;
+        }
+
+        .uptime {
+            font-size: 11px;
+            color: #4ade80;
+            font-family: 'DM Mono', monospace;
+            margin-top: 4px;
+        }
+
+        .version-pill {
+            background: rgba(129, 140, 248, 0.10);
+            border: 1px solid rgba(129, 140, 248, 0.2);
+            color: #818cf8;
+            font-size: 10px;
+            font-family: 'DM Mono', monospace;
+            padding: 4px 12px;
+            border-radius: 999px;
+        }
+
+        @media (max-width: 600px) {
+            .stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .path-desc {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+
+        <div class="header">
+            <div class="badge"><span class="badge-dot"></span>API ONLINE — v1.0.0</div>
+            <p class="logo-label">Coasther</p>
+            <h1>Smart Kost<br><span>Management API</span></h1>
+            <p class="desc">REST API untuk sistem manajemen Kost berbasis IoT (Smart Meter). Mendukung monitoring
+                utilitas
+                real-time, manajemen penghuni, tagihan otomatis, dan AI analytics.</p>
+        </div>
+
+        <div class="stats">
+            <div class="stat"><span class="stat-value">REST</span><span class="stat-label">Protocol</span></div>
+            <div class="stat"><span class="stat-value">MQTT</span><span class="stat-label">IoT Layer</span></div>
+            <div class="stat"><span class="stat-value">AI</span><span class="stat-label">Gemini</span></div>
+            <div class="stat"><span class="stat-value" id="ep-count">23</span><span class="stat-label">Endpoints</span>
+            </div>
+        </div>
+
+        <!-- AUTH -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Auth</span><span class="section-line"></span></div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/auth/register</span><span class="path-desc">Daftar akun baru</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/auth/login</span><span class="path-desc">Login & dapat token</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/auth/me</span><span class="path-desc">Data user aktif</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/auth/forgot-password/otp</span><span class="path-desc">Kirim OTP reset
+                        password</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/auth/forgot-password/otp/verify</span><span class="path-desc">Verifikasi
+                        OTP</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/auth/forgot-password/otp/reset</span><span class="path-desc">Reset password
+                        baru</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/auth/delete-account/otp</span><span class="path-desc">OTP hapus akun</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/auth/delete-account/confirm</span><span class="path-desc">Konfirmasi hapus
+                        akun</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ROOMS -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Rooms</span><span class="section-line"></span></div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/rooms</span><span class="path-desc">List kamar</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/rooms/all</span><span class="path-desc">List + fasilitas + review agg</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/rooms/dashboard/data</span><span class="path-desc">Data dashboard kamar</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/rooms/:id</span><span class="path-desc">Detail kamar</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/rooms</span><span class="path-desc">Buat kamar baru</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method patch">PATCH</span></div><span
+                        class="path">/api/rooms/:id</span><span class="path-desc">Update kamar</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method delete">DELETE</span></div><span
+                        class="path">/api/rooms/:id</span><span class="path-desc">Hapus kamar</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- TENANTS -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Tenants (self-service)</span><span
+                    class="section-line"></span></div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/tenants/my-room</span><span class="path-desc">Kamar aktif tenant</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/tenants/my-invoices/current</span><span class="path-desc">Tagihan bulan
+                        ini</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/tenants/my-invoices</span><span class="path-desc">Semua tagihan saya</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/tenants/my-usage</span><span class="path-desc">Pemakaian utilitas</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/tenants/my-meter-readings</span><span class="path-desc">Riwayat meter</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/tenants/booking</span><span class="path-desc">Booking kamar</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- COMPLAINTS -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Complaints</span><span class="section-line"></span>
+            </div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/complaints</span><span class="path-desc">Keluhan saya</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/complaints</span><span class="path-desc">Buat keluhan baru</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/complaints/:id</span><span class="path-desc">Detail keluhan</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method patch">PATCH</span></div><span
+                        class="path">/api/complaints/:id</span><span class="path-desc">Update keluhan</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/complaints/admin/complaints</span><span class="path-desc">Semua keluhan
+                        (admin)</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/complaints/admin/complaints/:id</span><span class="path-desc">Detail
+                        (admin)</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method patch">PATCH</span></div><span
+                        class="path">/api/complaints/admin/complaints/:id</span><span class="path-desc">Update status
+                        (admin)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ANNOUNCEMENTS -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Announcements</span><span
+                    class="section-line"></span></div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/announcements</span><span class="path-desc">List pengumuman</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/announcements/:id</span><span class="path-desc">Detail pengumuman</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/announcements</span><span class="path-desc">Buat pengumuman</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method patch">PATCH</span></div><span
+                        class="path">/api/announcements/:id</span><span class="path-desc">Update pengumuman</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method delete">DELETE</span></div><span
+                        class="path">/api/announcements/:id</span><span class="path-desc">Hapus pengumuman</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- REVIEWS -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Reviews</span><span class="section-line"></span>
+            </div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/reviews</span><span class="path-desc">Semua review</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/reviews</span><span class="path-desc">Buat review</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/reviews/my</span><span class="path-desc">Review saya</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/reviews/summary</span><span class="path-desc">Ringkasan semua kamar</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/reviews/rooms/:id</span><span class="path-desc">Review per kamar</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/reviews/rooms/:id/summary</span><span class="path-desc">Ringkasan per
+                        kamar</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- LEASES -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Leases</span><span class="section-line"></span>
+            </div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/leases</span><span class="path-desc">List kontrak sewa</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/leases/:id</span><span class="path-desc">Detail kontrak</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/leases</span><span class="path-desc">Buat kontrak baru</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method patch">PATCH</span></div><span
+                        class="path">/api/leases/:id</span><span class="path-desc">Update kontrak</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method delete">DELETE</span></div><span
+                        class="path">/api/leases/:id</span><span class="path-desc">Hapus kontrak</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- INVOICES -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Invoices (admin)</span><span
+                    class="section-line"></span></div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/invoices</span><span class="path-desc">List tagihan</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/invoices/:id</span><span class="path-desc">Detail tagihan</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method patch">PATCH</span></div><span
+                        class="path">/api/invoices/:id</span><span class="path-desc">Update tagihan</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- PAYMENTS -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Payments (admin)</span><span
+                    class="section-line"></span></div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/payments-admin</span><span class="path-desc">List pembayaran</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/payments-admin/:id</span><span class="path-desc">Detail pembayaran</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- IOT -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">IoT</span><span class="section-line"></span></div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/iot/meter-reading</span><span class="path-desc">Ingest sensor ESP32</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/iot/live-status</span><span class="path-desc">Status live semua kamar</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/iot/live-status/:roomId</span><span class="path-desc">Status live per
+                        kamar</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/iot/relay/:roomId</span><span class="path-desc">Kontrol relay kamar</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- METERS -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Meters</span><span class="section-line"></span>
+            </div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/meters</span><span class="path-desc">List perangkat meter</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/meters/:id</span><span class="path-desc">Detail meter</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/meters</span><span class="path-desc">Tambah meter</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method patch">PATCH</span></div><span
+                        class="path">/api/meters/:id</span><span class="path-desc">Update meter</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method delete">DELETE</span></div><span
+                        class="path">/api/meters/:id</span><span class="path-desc">Hapus meter</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- FACILITIES -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Facilities</span><span class="section-line"></span>
+            </div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/facilities</span><span class="path-desc">List fasilitas</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/facilities/:id</span><span class="path-desc">Detail fasilitas</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/facilities</span><span class="path-desc">Tambah fasilitas</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method patch">PATCH</span></div><span
+                        class="path">/api/facilities/:id</span><span class="path-desc">Update fasilitas</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method delete">DELETE</span></div><span
+                        class="path">/api/facilities/:id</span><span class="path-desc">Hapus fasilitas</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- TARIFF -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Tariff</span><span class="section-line"></span>
+            </div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/tariff</span><span class="path-desc">Get tarif utilitas</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method put">PUT</span></div><span
+                        class="path">/api/tariff</span><span class="path-desc">Update tarif</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- DASHBOARD -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Dashboard</span><span class="section-line"></span>
+            </div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/dashboard</span><span class="path-desc">Dashboard tenant</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/dashboard/stats</span><span class="path-desc">Statistik admin</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/dashboard/chart</span><span class="path-desc">Data chart</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/dashboard/summary</span><span class="path-desc">Ringkasan publik</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">AI — Gemini</span><span class="section-line"></span>
+            </div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/ai/rooms/:roomId/insight</span><span class="path-desc">Analisis utilitas
+                        kamar</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/ai/rooms/:roomId/prediction</span><span class="path-desc">Prediksi tagihan
+                        bulanan</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/ai/admin-chat</span><span class="path-desc">Chat AI asisten admin</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- USERS -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Users</span><span class="section-line"></span></div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method put">PUT</span></div><span
+                        class="path">/api/users/me</span><span class="path-desc">Update profil sendiri</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/users/all</span><span class="path-desc">Semua user</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/users/admin</span><span class="path-desc">User role admin</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- SCHEDULER -->
+        <div class="section">
+            <div class="section-header"><span class="section-label">Scheduler</span><span class="section-line"></span>
+            </div>
+            <div class="endpoints">
+                <div class="endpoint">
+                    <div class="methods"><span class="method get">GET</span></div><span
+                        class="path">/api/scheduler/status</span><span class="path-desc">Status cron job</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/scheduler/overdue</span><span class="path-desc">Trigger overdue manual</span>
+                </div>
+                <div class="endpoint">
+                    <div class="methods"><span class="method post">POST</span></div><span
+                        class="path">/api/scheduler/billing</span><span class="path-desc">Trigger billing manual</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div>
+                <div class="footer-left">localhost:5000 — Denpasar Selatan, Bali</div>
+                <div class="uptime" id="uptime">uptime:</div>
+            </div>
+            <span class="version-pill">Coasther Project &copy;2026
+            </span>
+        </div>
+
+    </div>
+    <script>
+        const count = document.querySelectorAll('.endpoint').length;
+        document.getElementById('ep-count').textContent = count;
+
+        const start = Date.now();
+        function tick() {
+            const s = Math.floor((Date.now() - start) / 1000);
+            const h = String(Math.floor(s / 3600)).padStart(2, '0');
+            const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+            const sec = String(s % 60).padStart(2, '0');
+            document.getElementById('uptime').textContent = 'uptime: ' + h + ':' + m + ':' + sec;
+        }
+        setInterval(tick, 1000);
+        tick();
+    </script>
+</body>
+
+</html>
