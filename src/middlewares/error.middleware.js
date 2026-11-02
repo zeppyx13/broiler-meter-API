@@ -10,7 +10,7 @@ function errorHandler(err, req, res, next) {
   if (err instanceof ZodError) {
     statusCode = 400;
     message = "Validation error";
-    errors = err.errors.map((e) => ({
+    errors = err.issues.map((e) => ({
       path: e.path.join("."),
       message: e.message,
     }));
@@ -21,13 +21,18 @@ function errorHandler(err, req, res, next) {
     message = "Duplicate data";
   }
 
+  if (err.code === "ER_ROW_IS_REFERENCED_2" || err.code === "ER_NO_REFERENCED_ROW_2") {
+    statusCode = 409;
+    message = "Resource is referenced or a required related resource does not exist";
+  }
+
   if (process.env.NODE_ENV !== "test") {
     console.error(err);
   }
 
   return res.status(statusCode).json({
     success: false,
-    message,
+    message: statusCode >= 500 ? "Internal server error" : message,
     ...(errors ? { errors } : {}),
   });
 }

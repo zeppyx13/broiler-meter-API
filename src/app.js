@@ -4,28 +4,10 @@ const helmet = require("helmet");
 const path = require("path");
 // routes init
 const authRoutes = require("./routes/auth.routes");
-const roomRoutes = require("./routes/room.routes");
-const tenantRoutes = require("./routes/tenant.routes");
-const paymentRoutes = require("./routes/payment.routes");
-const iotRoutes = require("./routes/iot.routes");
-const announcementRoutes = require("./routes/announcement.routes");
-const reviewRoutes = require("./routes/review.routes");
-const complaintRoutes = require("./routes/complaint.routes");
-const dashboardRoutes = require("./routes/dashboard.routes");
-const weatherRoutes = require("./routes/weather.routes");
 const userRoutes = require("./routes/user.routes");
-const ai = require("./routes/ai.routes");
-const unsplashRoutes = require("./routes/unsplash.routes");
-const tariffRoutes = require("./routes/tariff.routes");
-const leaseRoutes = require("./routes/lease.routes");
-const invoiceAdminRoutes = require("./routes/invoice.admin.routes");
-const facilityRoutes = require("./routes/facility.routes");
-const meterRoutes = require("./routes/meter.routes");
-const paymentAdminRoutes = require("./routes/payment.admin.routes");
 const userAdminRoutes = require("./routes/user.admin.routes");
-const schedulerRoutes = require("./routes/scheduler.routes");
 const uploadRoutes = require("./routes/upload.routes");
-const notificationRoutes = require("./routes/notification.routes");
+const isBroiler = process.env.DB_NAME === "coasther_broiler";
 // app init
 const app = express();
 app.set("trust proxy", 1);
@@ -78,28 +60,36 @@ app.get("/", (req, res) => {
   res.status(200).sendFile(path.join(__dirname, "../index.html"));
 });
 app.use("/api/auth", authRoutes);
-app.use("/api/rooms", roomRoutes);
-app.use("/api/tenants", tenantRoutes);
-app.use("/api/payments", paymentRoutes);
-app.use("/api/iot", iotRoutes);
-app.use("/api/announcements", announcementRoutes);
-app.use("/api/reviews", reviewRoutes);
-app.use("/api/complaints", complaintRoutes);
-app.use("/api/dashboard", dashboardRoutes);
-app.use("/api/weather", weatherRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/ai", ai);
-app.use("/api/unsplash", unsplashRoutes);
-app.use("/api/tariff", tariffRoutes);
-app.use("/api/leases", leaseRoutes);
-app.use("/api/invoices", invoiceAdminRoutes);
-app.use("/api/facilities", facilityRoutes);
-app.use("/api/meters", meterRoutes);
-app.use("/api/payments-admin", paymentAdminRoutes);
 app.use("/api/users-admin", userAdminRoutes);
-app.use("/api/scheduler", schedulerRoutes);
 app.use("/api/upload", uploadRoutes);
-app.use("/api/notifications", notificationRoutes);
+if (isBroiler) {
+  app.use("/api/farms", require("./routes/farm.routes"));
+  app.use("/api/coops", require("./routes/coop.routes"));
+  app.use("/api/flock-cycles", require("./routes/flockCycle.routes"));
+  app.use("/api/dashboard", require("./routes/dashboardContext.routes"));
+} else {
+  // Retain legacy routes without loading their MQTT/payment/AI dependencies in broiler mode.
+  app.use("/api/rooms", require("./routes/room.routes"));
+  app.use("/api/tenants", require("./routes/tenant.routes"));
+  app.use("/api/payments", require("./routes/payment.routes"));
+  app.use("/api/iot", require("./routes/iot.routes"));
+  app.use("/api/announcements", require("./routes/announcement.routes"));
+  app.use("/api/reviews", require("./routes/review.routes"));
+  app.use("/api/complaints", require("./routes/complaint.routes"));
+  app.use("/api/dashboard", require("./routes/dashboard.routes"));
+  app.use("/api/weather", require("./routes/weather.routes"));
+  app.use("/api/ai", require("./routes/ai.routes"));
+  app.use("/api/unsplash", require("./routes/unsplash.routes"));
+  app.use("/api/tariff", require("./routes/tariff.routes"));
+  app.use("/api/leases", require("./routes/lease.routes"));
+  app.use("/api/invoices", require("./routes/invoice.admin.routes"));
+  app.use("/api/facilities", require("./routes/facility.routes"));
+  app.use("/api/meters", require("./routes/meter.routes"));
+  app.use("/api/payments-admin", require("./routes/payment.admin.routes"));
+  app.use("/api/scheduler", require("./routes/scheduler.routes"));
+  app.use("/api/notifications", require("./routes/notification.routes"));
+}
 // 404 handler
 app.use(notFound);
 app.use(errorHandler);

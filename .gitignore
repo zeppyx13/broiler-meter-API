@@ -31,4 +31,7 @@ public/img/*
 coasther-*.json
 Docs
 Docs/*
+# Keep the core implementation contract and verification notes reviewable.
+docs/
+docs/*
 AGENTS.md

@@ -3,8 +3,6 @@ dotenv.config();
 
 const app = require("./src/app");
 const db = require("./src/config/db");
-const { client: mqttClient, setIo } = require("./src/config/mqtt");
-const { startScheduler } = require("./src/jobs/scheduler");
 const logger = require("./src/config/logger");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -16,7 +14,6 @@ const io = new Server(server, {
 });
 
 app.set("io", io);
-setIo(io);
 
 io.on("connection", (socket) => {
   logger.info(`WebSocket connected: ${socket.id}`);
@@ -27,10 +24,17 @@ io.on("connection", (socket) => {
 
 (async () => {
   try {
-    await db.query("SELECT 1");
+    if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is required");
+    if (process.env.DB_NAME === "coasther_broiler") {
+      const result = await require("./src/services/schemaCompatibility.service").verify();
+      logger.info(`Broiler schema verified: ${result.verified_tables} tables, ${result.verified_columns} columns`);
+      logger.info("Broiler core mode: legacy MQTT, billing and cleanup jobs are disabled");
+    } else {
+      await db.query("SELECT 1");
+      require("./src/config/mqtt").setIo(io);
+      require("./src/jobs/scheduler").startScheduler();
+    }
     logger.info("MySQL connected");
-
-    startScheduler();
 
     server.listen(PORT, () => {
       logger.info(`Server running on http://localhost:${PORT}`);
