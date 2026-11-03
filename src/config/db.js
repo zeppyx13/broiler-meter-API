@@ -13,4 +13,11 @@ const pool = mysql.createPool({
   timezone: "Z",
 });
 
+// mysql2's timezone controls serialization, not the server session's TIMESTAMP conversion.
+pool.on("connection", (connection) => {
+  connection.query("SET time_zone = ?", ["+00:00"], (error) => {
+    if (error) connection.destroy();
+  });
+});
+
 module.exports = pool;

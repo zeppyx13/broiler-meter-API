@@ -68,6 +68,9 @@ if (isBroiler) {
   app.use("/api/coops", require("./routes/coop.routes"));
   app.use("/api/flock-cycles", require("./routes/flockCycle.routes"));
   app.use("/api/dashboard", require("./routes/dashboardContext.routes"));
+  app.use("/api/devices", require("./routes/device.routes"));
+  app.use("/api/meters", require("./routes/meterBroiler.routes"));
+  app.use("/api/dashboard", require("./routes/dashboardMonitoring.routes"));
 } else {
   // Retain legacy routes without loading their MQTT/payment/AI dependencies in broiler mode.
   app.use("/api/rooms", require("./routes/room.routes"));

@@ -14,6 +14,9 @@ const io = new Server(server, {
 });
 
 app.set("io", io);
+if (process.env.DB_NAME === "coasther_broiler") {
+  require("./src/services/broilerSocket.service").attach(io);
+}
 
 io.on("connection", (socket) => {
   logger.info(`WebSocket connected: ${socket.id}`);
@@ -26,9 +29,15 @@ io.on("connection", (socket) => {
   try {
     if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is required");
     if (process.env.DB_NAME === "coasther_broiler") {
-      const result = await require("./src/services/schemaCompatibility.service").verify();
-      logger.info(`Broiler schema verified: ${result.verified_tables} tables, ${result.verified_columns} columns`);
-      logger.info("Broiler core mode: legacy MQTT, billing and cleanup jobs are disabled");
+      const result =
+        await require("./src/services/schemaCompatibility.service").verify();
+      logger.info(
+        `Broiler schema verified: ${result.verified_tables} tables, ${result.verified_columns} columns`,
+      );
+      require("./src/config/mqttBroiler").start({ io });
+      logger.info(
+        "Broiler monitoring mode: legacy billing and cleanup jobs are disabled",
+      );
     } else {
       await db.query("SELECT 1");
       require("./src/config/mqtt").setIo(io);

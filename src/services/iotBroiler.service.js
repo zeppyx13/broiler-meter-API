@@ -1,0 +1,322 @@
+const model = require("../models/iotBroiler.model");
+const access = require("./access.service");
+const withTransaction = require("../utils/transaction");
+const { localDate } = require("../utils/farmDate");
+const { classify } = require("../utils/meterCounter");
+const { parseMessage } = require("../validators/iotBroiler.validator");
+const logger = require("../config/logger");
+const { staleSeconds } = require("../utils/deviceStatus");
+
+const measurementFields = {
+  flow_rate_lpm: "flow_rate_lpm",
+  water_total_liter: "water_total_liter",
+  voltage: "voltage_v",
+  current: "current_a",
+  power: "power_w",
+  energy_kwh_total: "energy_kwh_total",
+  frequency: "frequency_hz",
+  pf: "power_factor",
+};
+
+function historicalCycle(cycles, date, timezone) {
+  const day = localDate(timezone, date);
+  const candidates = cycles.filter(
+    (cycle) =>
+      cycle.placement_date <= day &&
+      (!cycle.actual_harvest_date || day <= cycle.actual_harvest_date),
+  );
+  // Placement/harvest dates have no within-day time. Shared boundary days are ambiguous.
+  return candidates.length === 1 ? candidates[0].id : null;
+}
+
+async function publish(io, event, payload) {
+  if (io) await require("./broilerSocket.service").publish(io, event, payload);
+}
+
+async function refreshMetrics(result) {
+  if (result?.flock_cycle_id) {
+    try {
+      await require("./dailyMetrics.service").recalculateForReading(result);
+    } catch {
+      // Raw reading is committed. Dashboard reads rebuild metrics, so a cache failure is retryable.
+      logger.warn("Broiler metrics refresh deferred");
+    }
+  }
+}
+
+async function ingestReading(
+  key,
+  payload,
+  { source, receivedAt, io, heartbeat },
+) {
+  const mapping = await model.meterByUid(key);
+  if (!mapping) return { outcome: "unmapped" };
+  const result = await withTransaction(async (connection) => {
+    const coop = await access.lockCoop(connection, mapping.coop_id);
+    const device = await model.lockDevice(mapping.device_id, connection);
+    const meter = await model.lockMeter(mapping.id, connection);
+    const farm = await model.farmContext(coop.farm_id, connection);
+    if (
+      !device.is_active ||
+      !meter.is_active ||
+      coop.status !== "active" ||
+      !farm.is_active
+    ) {
+      return { outcome: "disabled" };
+    }
+    if (
+      (meter.type === "water" && meter.unit !== "liter") ||
+      (meter.type === "electricity" && meter.unit !== "kwh")
+    ) {
+      return { outcome: "invalid_mapping" };
+    }
+    const lastSeen =
+      source !== "simulation" && heartbeat
+        ? await model.seen(device.id, receivedAt, connection)
+        : null;
+    if (
+      await model.duplicate(
+        meter.id,
+        payload.reading_value,
+        payload.recorded_at,
+        source,
+        connection,
+      )
+    ) {
+      return {
+        outcome: "duplicate",
+        coop_id: device.coop_id,
+        device_id: device.id,
+        last_seen_at: lastSeen,
+      };
+    }
+    const previous = await model.cursor(meter.id, source, connection);
+    const cycleId = historicalCycle(
+      await model.cycles(device.coop_id, connection),
+      payload.recorded_at,
+      farm.timezone,
+    );
+    const conflict = await model.timestampConflict(
+      meter.id,
+      payload.recorded_at,
+      source,
+      connection,
+    );
+    const decision = conflict
+      ? {
+          reading_status: "suspect",
+          delta_value: "0.000000",
+          counter_epoch: Number(previous?.counter_epoch || 0),
+          is_latest: false,
+        }
+      : classify(previous, payload.reading_value, payload.recorded_at, cycleId);
+    const reading = {
+      ...decision,
+      meter_id: meter.id,
+      device_id: device.id,
+      coop_id: device.coop_id,
+      meter_uid: meter.meter_uid,
+      type: meter.type,
+      unit: meter.unit,
+      flock_cycle_id: cycleId,
+      reading_value: payload.reading_value,
+      recorded_at: payload.recorded_at,
+      received_at: receivedAt,
+      source,
+      last_seen_at: lastSeen,
+    };
+    reading.id = await model.insertReading(reading, connection);
+    if (decision.is_latest && source !== "simulation")
+      await model.updateCursor(reading, connection);
+    return { outcome: "stored", ...reading };
+  });
+  if (result.outcome === "stored") {
+    await refreshMetrics(result);
+    await publish(io, "meter_update", result);
+  }
+  if (result.last_seen_at && ["stored", "duplicate"].includes(result.outcome)) {
+    await publish(io, "device_status", {
+      device_id: result.device_id,
+      coop_id: result.coop_id,
+      connectivity_status: "online",
+      last_seen_at: result.last_seen_at,
+      observed_at: receivedAt,
+      source: "mqtt",
+      is_latest: true,
+    });
+  }
+  return result;
+}
+
+function mergeSnapshot(existing, payload, device, source) {
+  const sameSource = existing && existing.source === source;
+  const old = sameSource ? existing : null;
+  let metadata = {};
+  try {
+    metadata = old?.phase_data_json ? JSON.parse(old.phase_data_json) : {};
+  } catch {
+    /* historical metadata absent */
+  }
+  const times = metadata.metric_recorded_at || {};
+  const origins = metadata.metric_device_id || {};
+  const ambiguous = new Set(metadata.ambiguous_metrics || []);
+  const result = {
+    coop_id: device.coop_id,
+    device_id: device.id,
+    source,
+    recorded_at: payload.recorded_at,
+  };
+  for (const [input, field] of Object.entries(measurementFields)) {
+    result[field] = old?.[field] == null ? null : Number(old[field]);
+    if (payload[input] === undefined) continue;
+    const priorDevice = origins[field] ?? old?.device_id;
+    if (
+      priorDevice != null &&
+      Number(priorDevice) !== Number(device.id) &&
+      old?.[field] != null
+    )
+      ambiguous.add(field);
+    result[field] = ambiguous.has(field) ? null : payload[input];
+    times[field] = payload.recorded_at.toISOString();
+    origins[field] = device.id;
+  }
+  result.phase_data_json = {
+    metric_recorded_at: times,
+    metric_device_id: origins,
+    ambiguous_metrics: [...ambiguous],
+    ntp_synced: payload.ntp_synced ?? null,
+  };
+  return result;
+}
+
+async function ingestTelemetry(
+  key,
+  payload,
+  { source, receivedAt, io, heartbeat },
+) {
+  const mapping = await model.deviceByTopic(key);
+  if (!mapping) return { outcome: "unmapped" };
+  const result = await withTransaction(async (connection) => {
+    const coop = await access.lockCoop(connection, mapping.coop_id);
+    const device = await model.lockDevice(mapping.id, connection);
+    const farm = await model.farmContext(coop.farm_id, connection);
+    if (!device.is_active || coop.status !== "active" || !farm.is_active) {
+      return { outcome: "disabled" };
+    }
+    const lastSeen =
+      source !== "simulation" && heartbeat
+        ? await model.seen(device.id, receivedAt, connection)
+        : null;
+    const existing = await model.snapshot(device.coop_id, connection);
+    const snapshotSource = source === "simulation" ? "simulation" : "sensor";
+    const newer =
+      (existing?.source === "simulation" && snapshotSource === "sensor") ||
+      !existing?.recorded_at ||
+      payload.recorded_at.getTime() > new Date(existing.recorded_at).getTime();
+    const allowedSource = !(
+      snapshotSource === "simulation" && existing?.source === "sensor"
+    );
+    if (!newer || !allowedSource)
+      return {
+        outcome: "historical_telemetry",
+        device_id: device.id,
+        coop_id: device.coop_id,
+        is_latest: false,
+        recorded_at: payload.recorded_at,
+        received_at: receivedAt,
+        source: snapshotSource,
+        last_seen_at: lastSeen,
+      };
+    const snapshot = mergeSnapshot(existing, payload, device, snapshotSource);
+    await model.saveSnapshot(snapshot, connection);
+    return {
+      outcome: "stored",
+      device_id: device.id,
+      coop_id: device.coop_id,
+      snapshot,
+      is_latest: true,
+      recorded_at: payload.recorded_at,
+      received_at: receivedAt,
+      source: snapshotSource,
+      last_seen_at: lastSeen,
+    };
+  });
+  if (result.outcome === "stored")
+    await publish(io, "telemetry_update", result);
+  if (
+    result.last_seen_at &&
+    ["stored", "historical_telemetry"].includes(result.outcome)
+  ) {
+    await publish(io, "device_status", {
+      device_id: result.device_id,
+      coop_id: result.coop_id,
+      connectivity_status: "online",
+      last_seen_at: result.last_seen_at,
+      observed_at: receivedAt,
+      source: "mqtt",
+      is_latest: true,
+    });
+  }
+  return result;
+}
+
+async function handleMessage(
+  topic,
+  message,
+  { source = "mqtt", receivedAt = new Date(), io, heartbeat = true } = {},
+) {
+  try {
+    if (!["mqtt", "simulation"].includes(source))
+      return { outcome: "invalid_source" };
+    const parsed = parseMessage(topic, message);
+    if (!parsed) return { outcome: "unknown_topic" };
+    // Raw diagnostic payloads can contain Wi-Fi credentials or command tokens. Do not persist or forward them.
+    if (parsed.kind === "diagnostic") return { outcome: "diagnostic_ignored" };
+    if (
+      parsed.payload.recorded_at.getTime() > receivedAt.getTime() + 300000 ||
+      parsed.payload.recorded_at.getUTCFullYear() < 2000
+    )
+      return { outcome: "invalid_timestamp" };
+    return await (parsed.kind === "meter" ? ingestReading : ingestTelemetry)(
+      parsed.key,
+      parsed.payload,
+      { source, receivedAt, io, heartbeat },
+    );
+  } catch (error) {
+    // Never echo raw payload, identifiers from untrusted input, connection credentials or error SQL values.
+    const outcome =
+      error.name === "ZodError" ||
+      error instanceof SyntaxError ||
+      ["payload_too_large", "invalid_topic"].includes(error.message)
+        ? "invalid_payload"
+        : "processing_error";
+    logger.warn(`Broiler MQTT message rejected: ${outcome}`);
+    return { outcome };
+  }
+}
+
+async function checkDeviceStatus(io, now = new Date()) {
+  const cutoff = new Date(now.getTime() - staleSeconds() * 1000);
+  let changed = 0;
+  for (const device of await model.staleDevices(cutoff)) {
+    if (!(await model.markOffline(device.id, cutoff))) continue;
+    changed++;
+    await publish(io, "device_status", {
+      coop_id: device.coop_id,
+      device_id: device.id,
+      connectivity_status: "offline",
+      last_seen_at: device.last_seen_at,
+      observed_at: now,
+      source: "timeout",
+      is_latest: true,
+    });
+  }
+  return changed;
+}
+
+module.exports = {
+  handleMessage,
+  historicalCycle,
+  mergeSnapshot,
+  checkDeviceStatus,
+};
