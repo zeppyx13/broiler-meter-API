@@ -23,22 +23,33 @@ async function coopForUser(userId, coopId, connection = db) {
 }
 
 async function lockFarm(farmId, connection) {
-  const [rows] = await connection.query("SELECT * FROM farms WHERE id = ? FOR UPDATE", [farmId]);
+  const [rows] = await connection.query(
+    "SELECT * FROM farms WHERE id = ? FOR UPDATE",
+    [farmId],
+  );
   return rows[0] || null;
 }
 
 async function lockCoop(coopId, connection) {
-  const [rows] = await connection.query("SELECT * FROM coops WHERE id = ? FOR UPDATE", [coopId]);
+  const [rows] = await connection.query(
+    "SELECT * FROM coops WHERE id = ? FOR UPDATE",
+    [coopId],
+  );
   return rows[0] || null;
 }
 
 async function findCoop(coopId, connection = db) {
-  const [rows] = await connection.query("SELECT * FROM coops WHERE id = ?", [coopId]);
+  const [rows] = await connection.query("SELECT * FROM coops WHERE id = ?", [
+    coopId,
+  ]);
   return rows[0] || null;
 }
 
 async function lockUser(userId, connection) {
-  const [rows] = await connection.query("SELECT id, default_coop_id FROM users WHERE id = ? FOR UPDATE", [userId]);
+  const [rows] = await connection.query(
+    "SELECT id, default_coop_id FROM users WHERE id = ? FOR UPDATE",
+    [userId],
+  );
   return rows[0] || null;
 }
 
@@ -71,10 +82,20 @@ async function firstAccessibleCoop(user, connection = db) {
 }
 
 async function setDefaultCoop(userId, coopId, connection = db) {
-  await connection.query("UPDATE users SET default_coop_id = ? WHERE id = ?", [coopId, userId]);
+  await connection.query("UPDATE users SET default_coop_id = ? WHERE id = ?", [
+    coopId,
+    userId,
+  ]);
 }
 
 module.exports = {
-  farmForUser, coopForUser, lockFarm, lockCoop, findCoop, lockUser,
-  findDefaultCoop, firstAccessibleCoop, setDefaultCoop,
+  farmForUser,
+  coopForUser,
+  lockFarm,
+  lockCoop,
+  findCoop,
+  lockUser,
+  findDefaultCoop,
+  firstAccessibleCoop,
+  setDefaultCoop,
 };

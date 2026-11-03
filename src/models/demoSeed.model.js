@@ -1,5 +1,8 @@
 async function admin(email, connection) {
-  const [rows] = await connection.query("SELECT id, name, role, password_hash FROM users WHERE email = ? FOR UPDATE", [email]);
+  const [rows] = await connection.query(
+    "SELECT id, name, role, password_hash FROM users WHERE email = ? FOR UPDATE",
+    [email],
+  );
   return rows[0] || null;
 }
 

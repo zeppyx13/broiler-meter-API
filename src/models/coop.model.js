@@ -17,7 +17,14 @@ async function create(data, connection) {
   const [result] = await connection.query(
     `INSERT INTO coops (farm_id, code, name, capacity_birds, description, status)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [data.farm_id, data.code, data.name, data.capacity_birds, data.description, data.status],
+    [
+      data.farm_id,
+      data.code,
+      data.name,
+      data.capacity_birds,
+      data.description,
+      data.status,
+    ],
   );
   return result.insertId;
 }
@@ -25,13 +32,21 @@ async function create(data, connection) {
 async function update(coopId, data, connection) {
   await connection.query(
     "UPDATE coops SET code = ?, name = ?, capacity_birds = ?, description = ?, status = ? WHERE id = ?",
-    [data.code, data.name, data.capacity_birds, data.description, data.status, coopId],
+    [
+      data.code,
+      data.name,
+      data.capacity_birds,
+      data.description,
+      data.status,
+      coopId,
+    ],
   );
 }
 
 async function activeCycle(coopId, connection) {
   const [rows] = await connection.query(
-    "SELECT id, current_population FROM flock_cycles WHERE coop_id = ? AND status = 'active' FOR UPDATE", [coopId],
+    "SELECT id, current_population FROM flock_cycles WHERE coop_id = ? AND status = 'active' FOR UPDATE",
+    [coopId],
   );
   return rows[0] || null;
 }

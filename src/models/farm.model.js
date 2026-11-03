@@ -15,8 +15,14 @@ async function create(userId, data, connection) {
   const [result] = await connection.query(
     `INSERT INTO farms (owner_user_id, name, location_text, timezone,
        electricity_rate_idr_per_kwh, water_rate_idr_per_m3) VALUES (?, ?, ?, ?, ?, ?)`,
-    [userId, data.name, data.location_text, data.timezone,
-      data.electricity_rate_idr_per_kwh, data.water_rate_idr_per_m3],
+    [
+      userId,
+      data.name,
+      data.location_text,
+      data.timezone,
+      data.electricity_rate_idr_per_kwh,
+      data.water_rate_idr_per_m3,
+    ],
   );
   return result.insertId;
 }
@@ -25,13 +31,23 @@ async function update(farmId, data, connection) {
   await connection.query(
     `UPDATE farms SET name = ?, location_text = ?, timezone = ?,
        electricity_rate_idr_per_kwh = ?, water_rate_idr_per_m3 = ?, is_active = ? WHERE id = ?`,
-    [data.name, data.location_text, data.timezone, data.electricity_rate_idr_per_kwh,
-      data.water_rate_idr_per_m3, data.is_active ? 1 : 0, farmId],
+    [
+      data.name,
+      data.location_text,
+      data.timezone,
+      data.electricity_rate_idr_per_kwh,
+      data.water_rate_idr_per_m3,
+      data.is_active ? 1 : 0,
+      farmId,
+    ],
   );
 }
 
 async function lockCoops(farmId, connection) {
-  await connection.query("SELECT id FROM coops WHERE farm_id = ? ORDER BY id FOR UPDATE", [farmId]);
+  await connection.query(
+    "SELECT id FROM coops WHERE farm_id = ? ORDER BY id FOR UPDATE",
+    [farmId],
+  );
 }
 
 async function hasActiveCycles(farmId, connection) {
@@ -54,30 +70,40 @@ async function members(farmId, { page, limit }, connection = db) {
 }
 
 async function findUser(userId, connection) {
-  const [rows] = await connection.query("SELECT id FROM users WHERE id = ?", [userId]);
+  const [rows] = await connection.query("SELECT id FROM users WHERE id = ?", [
+    userId,
+  ]);
   return rows[0] || null;
 }
 
 async function findMember(farmId, userId, connection) {
   const [rows] = await connection.query(
-    "SELECT * FROM farm_members WHERE farm_id = ? AND user_id = ? FOR UPDATE", [farmId, userId],
+    "SELECT * FROM farm_members WHERE farm_id = ? AND user_id = ? FOR UPDATE",
+    [farmId, userId],
   );
   return rows[0] || null;
 }
 
 async function addMember(farmId, userId, role, connection) {
   const [result] = await connection.query(
-    "INSERT INTO farm_members (farm_id, user_id, role) VALUES (?, ?, ?)", [farmId, userId, role],
+    "INSERT INTO farm_members (farm_id, user_id, role) VALUES (?, ?, ?)",
+    [farmId, userId, role],
   );
   return result.insertId;
 }
 
 async function updateMember(farmId, userId, role, connection) {
-  await connection.query("UPDATE farm_members SET role = ? WHERE farm_id = ? AND user_id = ?", [role, farmId, userId]);
+  await connection.query(
+    "UPDATE farm_members SET role = ? WHERE farm_id = ? AND user_id = ?",
+    [role, farmId, userId],
+  );
 }
 
 async function removeMember(farmId, userId, connection) {
-  await connection.query("DELETE FROM farm_members WHERE farm_id = ? AND user_id = ?", [farmId, userId]);
+  await connection.query(
+    "DELETE FROM farm_members WHERE farm_id = ? AND user_id = ?",
+    [farmId, userId],
+  );
 }
 
 async function clearMemberDefault(farmId, userId, connection) {
@@ -89,6 +115,16 @@ async function clearMemberDefault(farmId, userId, connection) {
 }
 
 module.exports = {
-  list, create, update, lockCoops, hasActiveCycles, members, findUser,
-  findMember, addMember, updateMember, removeMember, clearMemberDefault,
+  list,
+  create,
+  update,
+  lockCoops,
+  hasActiveCycles,
+  members,
+  findUser,
+  findMember,
+  addMember,
+  updateMember,
+  removeMember,
+  clearMemberDefault,
 };

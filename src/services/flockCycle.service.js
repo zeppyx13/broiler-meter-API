@@ -7,8 +7,15 @@ const { localDate, dayAge } = require("../utils/farmDate");
 function present(cycle) {
   if (!cycle) return null;
   const today = localDate(cycle.timezone);
-  const ageDate = cycle.status === "completed" && cycle.actual_harvest_date ? cycle.actual_harvest_date : today;
-  return { ...cycle, day_age: dayAge(cycle.placement_date, ageDate), local_date: today };
+  const ageDate =
+    cycle.status === "completed" && cycle.actual_harvest_date
+      ? cycle.actual_harvest_date
+      : today;
+  return {
+    ...cycle,
+    day_age: dayAge(cycle.placement_date, ageDate),
+    local_date: today,
+  };
 }
 
 function checkPopulation(population, capacity) {
@@ -21,10 +28,17 @@ function checkPopulation(population, capacity) {
 async function create(user, payload) {
   return withTransaction(async (connection) => {
     await access.lockCoop(connection, payload.coop_id);
-    const coop = await access.requireCoop(user, payload.coop_id, "operate", connection);
-    if (payload.placement_date > localDate(coop.timezone)) throw httpError(400, "Active cycle placement cannot be in the future");
+    const coop = await access.requireCoop(
+      user,
+      payload.coop_id,
+      "operate",
+      connection,
+    );
+    if (payload.placement_date > localDate(coop.timezone))
+      throw httpError(400, "Active cycle placement cannot be in the future");
     checkPopulation(payload.initial_population, coop.capacity_birds);
-    if (await model.activeForUpdate(coop.id, connection)) throw httpError(409, "Coop already has an active cycle");
+    if (await model.activeForUpdate(coop.id, connection))
+      throw httpError(409, "Coop already has an active cycle");
     const id = await model.create(payload, connection);
     return present(await model.findById(id, connection));
   });
@@ -51,18 +65,39 @@ async function recordEvent(user, id, payload) {
   const existing = await get(user, id);
   return withTransaction(async (connection) => {
     await access.lockCoop(connection, existing.coop_id);
-    const coop = await access.requireCoop(user, existing.coop_id, "operate", connection);
+    const coop = await access.requireCoop(
+      user,
+      existing.coop_id,
+      "operate",
+      connection,
+    );
     const cycle = await model.lockById(id, connection);
-    if (cycle.status !== "active") throw httpError(409, "Only active cycles accept population events");
+    if (cycle.status !== "active")
+      throw httpError(409, "Only active cycles accept population events");
     const eventDate = payload.event_date || localDate(coop.timezone);
-    if (eventDate < cycle.placement_date || eventDate > localDate(coop.timezone)) {
-      throw httpError(400, "Event date must be between placement and the farm-local current date");
+    if (
+      eventDate < cycle.placement_date ||
+      eventDate > localDate(coop.timezone)
+    ) {
+      throw httpError(
+        400,
+        "Event date must be between placement and the farm-local current date",
+      );
     }
-    const population = Number(cycle.current_population) + payload.population_change;
+    const population =
+      Number(cycle.current_population) + payload.population_change;
     checkPopulation(population, coop.capacity_birds);
-    const eventId = await model.insertEvent(id, { ...payload, event_date: eventDate }, user.id, connection);
+    const eventId = await model.insertEvent(
+      id,
+      { ...payload, event_date: eventDate },
+      user.id,
+      connection,
+    );
     await model.updatePopulation(id, population, connection);
-    return { event_id: eventId, cycle: present(await model.findById(id, connection)) };
+    return {
+      event_id: eventId,
+      cycle: present(await model.findById(id, connection)),
+    };
   });
 }
 
@@ -75,13 +110,26 @@ async function complete(user, id, payload) {
   const existing = await get(user, id);
   return withTransaction(async (connection) => {
     await access.lockCoop(connection, existing.coop_id);
-    const coop = await access.requireCoop(user, existing.coop_id, "operate", connection);
+    const coop = await access.requireCoop(
+      user,
+      existing.coop_id,
+      "operate",
+      connection,
+    );
     const cycle = await model.lockById(id, connection);
-    if (cycle.status !== "active") throw httpError(409, "Only active cycles can be completed");
+    if (cycle.status !== "active")
+      throw httpError(409, "Only active cycles can be completed");
     const date = payload.actual_harvest_date || localDate(coop.timezone);
     const latestEvent = await model.latestEventDate(id, connection);
-    if (date < cycle.placement_date || date > localDate(coop.timezone) || (latestEvent && date < latestEvent)) {
-      throw httpError(400, "Completion date must follow placement and all events, and cannot be in the future");
+    if (
+      date < cycle.placement_date ||
+      date > localDate(coop.timezone) ||
+      (latestEvent && date < latestEvent)
+    ) {
+      throw httpError(
+        400,
+        "Completion date must follow placement and all events, and cannot be in the future",
+      );
     }
     await model.complete(id, date, connection);
     return present(await model.findById(id, connection));

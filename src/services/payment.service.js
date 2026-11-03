@@ -210,9 +210,9 @@ async function handleMidtransWebhook(notification) {
           sendNotification({
             fcm_token: user.fcm_token,
             title: "Pembayaran Berhasil ✅",
-            body: `Pembayaran tagihan bulan ${invoice.month} sebesar Rp${updateData.amount.toLocaleString('id-ID')} telah diterima.`,
-            data: { type: "payment" }
-          }).catch(err => logger.error(`[FCM] Error: ${err.message}`));
+            body: `Pembayaran tagihan bulan ${invoice.month} sebesar Rp${updateData.amount.toLocaleString("id-ID")} telah diterima.`,
+            data: { type: "payment" },
+          }).catch((err) => logger.error(`[FCM] Error: ${err.message}`));
         }
       } catch (e) {
         logger.error(`[FCM] Gagal kirim: ${e.message}`);

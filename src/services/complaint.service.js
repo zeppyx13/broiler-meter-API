@@ -115,8 +115,8 @@ async function updateComplaintAdmin(id, payload) {
         fcm_token: user.fcm_token,
         title: "Update Keluhan 🔔",
         body: `Status keluhan "${existing.title}" kamu diperbarui menjadi ${payload.status}.`,
-        data: { type: "complaint" }
-      }).catch(err => logger.error(`[FCM] Error: ${err.message}`));
+        data: { type: "complaint" },
+      }).catch((err) => logger.error(`[FCM] Error: ${err.message}`));
     }
   } catch (e) {
     logger.error(`[FCM] Gagal kirim: ${e.message}`);

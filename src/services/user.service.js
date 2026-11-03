@@ -15,14 +15,21 @@ async function updateMe(userId, payload) {
       throw err;
     }
     if (payload.default_coop_id != null) {
-      const coop = await access.requireCoop(existing, payload.default_coop_id, "read", connection);
+      const coop = await access.requireCoop(
+        existing,
+        payload.default_coop_id,
+        "read",
+        connection,
+      );
       if (coop.status !== "active" || !coop.farm_is_active) {
-        const err = new Error("Default coop must belong to an active farm and be active");
+        const err = new Error(
+          "Default coop must belong to an active farm and be active",
+        );
         err.statusCode = 409;
         throw err;
       }
     }
-    if (!await userModel.lockById(userId, connection)) {
+    if (!(await userModel.lockById(userId, connection))) {
       const err = new Error("User not found");
       err.statusCode = 404;
       throw err;
@@ -52,7 +59,9 @@ async function deleteAccount(userId) {
       throw err;
     }
     if (await userModel.hasBusinessReferences(userId, connection)) {
-      const err = new Error("Account has farm membership or business history and cannot be deleted");
+      const err = new Error(
+        "Account has farm membership or business history and cannot be deleted",
+      );
       err.statusCode = 409;
       throw err;
     }

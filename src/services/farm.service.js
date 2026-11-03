@@ -13,7 +13,8 @@ async function detail(user, farmId) {
 }
 
 async function create(user, data) {
-  if (!["admin", "manager"].includes(user.role)) throw httpError(403, "Only admin or manager may create farms");
+  if (!["admin", "manager"].includes(user.role))
+    throw httpError(403, "Only admin or manager may create farms");
   return withTransaction(async (connection) => {
     const farmId = await model.create(user.id, data, connection);
     await model.addMember(farmId, user.id, "owner", connection);
@@ -27,7 +28,8 @@ async function update(user, farmId, data) {
     const farm = await access.requireFarm(user, farmId, "manage", connection);
     if (data.is_active === false) {
       await model.lockCoops(farmId, connection);
-      if (await model.hasActiveCycles(farmId, connection)) throw httpError(409, "Farm has an active flock cycle");
+      if (await model.hasActiveCycles(farmId, connection))
+        throw httpError(409, "Farm has an active flock cycle");
     }
     await model.update(farmId, { ...farm, ...data }, connection);
     return { farm: await access.requireFarm(user, farmId, "read", connection) };
@@ -47,10 +49,13 @@ async function changeMember(user, farmId, userId, role, action) {
   return withTransaction(async (connection) => {
     await accessModel.lockFarm(farmId, connection);
     const farm = await access.requireFarm(user, farmId, "owner", connection);
-    if (String(farm.owner_user_id) === String(userId)) throw httpError(409, "Farm owner membership cannot be changed");
-    if (!await model.findUser(userId, connection)) throw httpError(404, "User not found");
+    if (String(farm.owner_user_id) === String(userId))
+      throw httpError(409, "Farm owner membership cannot be changed");
+    if (!(await model.findUser(userId, connection)))
+      throw httpError(404, "User not found");
     const existing = await model.findMember(farmId, userId, connection);
-    if (existing?.role === "owner") throw httpError(409, "Owner membership cannot be changed");
+    if (existing?.role === "owner")
+      throw httpError(409, "Owner membership cannot be changed");
     if (action === "add") {
       if (existing) throw httpError(409, "User is already a farm member");
       await model.addMember(farmId, userId, role, connection);
@@ -67,4 +72,12 @@ async function changeMember(user, farmId, userId, role, action) {
   });
 }
 
-module.exports = { list, detail, create, update, remove, members, changeMember };
+module.exports = {
+  list,
+  detail,
+  create,
+  update,
+  remove,
+  members,
+  changeMember,
+};

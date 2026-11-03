@@ -630,16 +630,34 @@ async function* streamRoomInsight({ roomId, days = 30, forceRefresh = false }) {
     aiModel.getLatestMetersByRoom(roomId),
   ]);
 
-  if (!latestMeters.length) throw httpError("No active meters found for this room", 404);
+  if (!latestMeters.length)
+    throw httpError("No active meters found for this room", 404);
 
   const usageMap = buildUsageMap(dailyRows);
   const electricStats = calcStats(usageMap.electric);
   const waterStats = calcStats(usageMap.water);
 
-  let prompt = buildInsightPrompt({ roomId, days, latestMeters, electricStats, waterStats, dailyUsage: usageMap });
+  let prompt = buildInsightPrompt({
+    roomId,
+    days,
+    latestMeters,
+    electricStats,
+    waterStats,
+    dailyUsage: usageMap,
+  });
   if (prompt.length > PROMPT_MAX_CHARS) {
-    const trimmedUsage = { electric: usageMap.electric.slice(-14), water: usageMap.water.slice(-14) };
-    prompt = buildInsightPrompt({ roomId, days, latestMeters, electricStats, waterStats, dailyUsage: trimmedUsage });
+    const trimmedUsage = {
+      electric: usageMap.electric.slice(-14),
+      water: usageMap.water.slice(-14),
+    };
+    prompt = buildInsightPrompt({
+      roomId,
+      days,
+      latestMeters,
+      electricStats,
+      waterStats,
+      dailyUsage: trimmedUsage,
+    });
   }
 
   logger.info(`[AI] Streaming insight — room ${roomId}`);
@@ -683,11 +701,19 @@ async function* streamRoomPrediction({ roomId, forceRefresh = false }) {
 
   if (!roomPrice) throw httpError("Room not found", 404);
 
-  const waterM3 = toNumber3((currentUsage.find((c) => c.type === "water")?.used_so_far ?? 0) / 1000);
-  const elecKwh = toNumber3(currentUsage.find((c) => c.type === "electric")?.used_so_far ?? 0);
+  const waterM3 = toNumber3(
+    (currentUsage.find((c) => c.type === "water")?.used_so_far ?? 0) / 1000,
+  );
+  const elecKwh = toNumber3(
+    currentUsage.find((c) => c.type === "electric")?.used_so_far ?? 0,
+  );
   const rent = toNumber(roomPrice.price_monthly);
-  const waterCost = Math.max(0, waterM3 - toNumber(tariff.waterQuota)) * toNumber(tariff.waterRate);
-  const elecCost = Math.max(0, elecKwh - toNumber(tariff.electricQuota)) * toNumber(tariff.electricRate);
+  const waterCost =
+    Math.max(0, waterM3 - toNumber(tariff.waterQuota)) *
+    toNumber(tariff.waterRate);
+  const elecCost =
+    Math.max(0, elecKwh - toNumber(tariff.electricQuota)) *
+    toNumber(tariff.electricRate);
   const billingEstimate = {
     rent,
     waterCost: Math.round(waterCost),
@@ -696,15 +722,30 @@ async function* streamRoomPrediction({ roomId, forceRefresh = false }) {
   };
 
   const daysInfo = getDaysInfo();
-  const prompt = buildPredictionPrompt({ roomId, history, currentUsage, daysInfo, billingEstimate });
+  const prompt = buildPredictionPrompt({
+    roomId,
+    history,
+    currentUsage,
+    daysInfo,
+    billingEstimate,
+  });
 
   logger.info(`[AI] Streaming prediction — room ${roomId}`);
   for await (const event of streamGemini(prompt, predictionSchema)) {
     if (event.type === "chunk") {
       yield event;
     } else if (event.type === "done") {
-      const result = { room_id: Number(roomId), days_info: daysInfo, prediction: event.parsed };
-      await aiCacheModel.setCache(roomId, "prediction", result, PREDICTION_TTL_HOURS);
+      const result = {
+        room_id: Number(roomId),
+        days_info: daysInfo,
+        prediction: event.parsed,
+      };
+      await aiCacheModel.setCache(
+        roomId,
+        "prediction",
+        result,
+        PREDICTION_TTL_HOURS,
+      );
       yield { type: "done", result };
     }
   }

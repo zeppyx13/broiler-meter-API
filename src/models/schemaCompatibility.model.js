@@ -1,7 +1,9 @@
 const db = require("../config/db");
 
 async function metadata(connection = db) {
-  const [[selected]] = await connection.query("SELECT DATABASE() AS database_name, VERSION() AS version");
+  const [[selected]] = await connection.query(
+    "SELECT DATABASE() AS database_name, VERSION() AS version",
+  );
   const [tables] = await connection.query(
     "SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?",
     ["coasther_broiler"],

@@ -1,7 +1,13 @@
 ﻿const db = require("../config/db");
 
 async function findAll({ role, search, page = 1, limit = 10 } = {}) {
-  const params = [role ?? null, role ?? null, search ?? null, `%${search || ""}%`, `%${search || ""}%`];
+  const params = [
+    role ?? null,
+    role ?? null,
+    search ?? null,
+    `%${search || ""}%`,
+    `%${search || ""}%`,
+  ];
   const [rows] = await db.query(
     `SELECT id, name, email, role, phone, avatar_url, is_verified,
             default_coop_id, created_at, updated_at
@@ -35,9 +41,15 @@ async function updateById(id, data) {
        phone = CASE WHEN ? THEN ? ELSE phone END,
        role = CASE WHEN ? THEN ? ELSE role END
      WHERE id = ?`,
-    [data.name !== undefined, data.name ?? null,
-      data.phone !== undefined, data.phone ?? null,
-      data.role !== undefined, data.role ?? null, id],
+    [
+      data.name !== undefined,
+      data.name ?? null,
+      data.phone !== undefined,
+      data.phone ?? null,
+      data.role !== undefined,
+      data.role ?? null,
+      id,
+    ],
   );
 }
 

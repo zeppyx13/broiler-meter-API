@@ -3,7 +3,10 @@ const service = require("../services/coop.service");
 const schema = require("../validators/coop.validator");
 
 async function list(req, res) {
-  return ok(res, await service.list(req.user, schema.querySchema.parse(req.query)));
+  return ok(
+    res,
+    await service.list(req.user, schema.querySchema.parse(req.query)),
+  );
 }
 
 async function detail(req, res) {
@@ -12,12 +15,21 @@ async function detail(req, res) {
 }
 
 async function create(req, res) {
-  return ok(res, await service.create(req.user, schema.createSchema.parse(req.body)), "Coop created", 201);
+  return ok(
+    res,
+    await service.create(req.user, schema.createSchema.parse(req.body)),
+    "Coop created",
+    201,
+  );
 }
 
 async function update(req, res) {
   const { id } = schema.idParam.parse(req.params);
-  return ok(res, await service.update(req.user, id, schema.updateSchema.parse(req.body)), "Coop updated");
+  return ok(
+    res,
+    await service.update(req.user, id, schema.updateSchema.parse(req.body)),
+    "Coop updated",
+  );
 }
 
 async function remove(req, res) {

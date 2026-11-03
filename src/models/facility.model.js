@@ -39,7 +39,9 @@ async function deleteById(id) {
 }
 
 async function deleteFromRooms(facility_id) {
-  await db.query('DELETE FROM room_facilities WHERE facility_id = ?', [facility_id]);
+  await db.query("DELETE FROM room_facilities WHERE facility_id = ?", [
+    facility_id,
+  ]);
 }
 
 module.exports = {

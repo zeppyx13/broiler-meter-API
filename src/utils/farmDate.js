@@ -10,7 +10,11 @@ function localDate(timezone, now = new Date()) {
 }
 
 function dayAge(placementDate, calendarDate) {
-  return Math.round((Date.parse(calendarDate) - Date.parse(placementDate)) / 86400000) + 1;
+  return (
+    Math.round(
+      (Date.parse(calendarDate) - Date.parse(placementDate)) / 86400000,
+    ) + 1
+  );
 }
 
 module.exports = { localDate, dayAge };

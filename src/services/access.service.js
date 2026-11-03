@@ -19,14 +19,18 @@ function authorize(user, resource, capability) {
 async function requireFarm(user, farmId, capability = "read", connection = db) {
   const farm = await model.farmForUser(user.id, farmId, connection);
   authorize(user, farm, capability);
-  if (capability === "operate" && !farm.is_active) throw httpError(409, "Farm is inactive");
+  if (capability === "operate" && !farm.is_active)
+    throw httpError(409, "Farm is inactive");
   return farm;
 }
 
 async function requireCoop(user, coopId, capability = "read", connection = db) {
   const coop = await model.coopForUser(user.id, coopId, connection);
   authorize(user, coop, capability);
-  if (capability === "operate" && (!coop.farm_is_active || coop.status !== "active")) {
+  if (
+    capability === "operate" &&
+    (!coop.farm_is_active || coop.status !== "active")
+  ) {
     throw httpError(409, "Coop or farm is inactive");
   }
   return coop;

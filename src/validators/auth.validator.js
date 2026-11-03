@@ -1,20 +1,27 @@
 const { z } = require("zod");
 const emailSchema = z.string().trim().email().max(190).toLowerCase();
-const passwordSchema = z.string().min(6).refine((value) => Buffer.byteLength(value, "utf8") <= 72, {
-  message: "Password must not exceed 72 UTF-8 bytes",
-});
+const passwordSchema = z
+  .string()
+  .min(6)
+  .refine((value) => Buffer.byteLength(value, "utf8") <= 72, {
+    message: "Password must not exceed 72 UTF-8 bytes",
+  });
 
-const registerSchema = z.object({
-  name: z.string().trim().min(2).max(120),
-  email: emailSchema,
-  password: passwordSchema,
-  phone: z.string().max(30).optional(),
-}).strict();
+const registerSchema = z
+  .object({
+    name: z.string().trim().min(2).max(120),
+    email: emailSchema,
+    password: passwordSchema,
+    phone: z.string().max(30).optional(),
+  })
+  .strict();
 
-const loginSchema = z.object({
-  email: emailSchema,
-  password: z.string().min(1).max(1024),
-}).strict();
+const loginSchema = z
+  .object({
+    email: emailSchema,
+    password: z.string().min(1).max(1024),
+  })
+  .strict();
 const forgotPasswordSchema = z.object({
   email: emailSchema,
 });

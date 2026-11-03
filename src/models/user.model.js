@@ -50,11 +50,19 @@ async function updateById(id, data, connection = db) {
        default_coop_id = CASE WHEN ? THEN ? ELSE default_coop_id END,
        fcm_token = CASE WHEN ? THEN ? ELSE fcm_token END
      WHERE id = ?`,
-    [data.name !== undefined, data.name ?? null,
-      data.phone !== undefined, data.phone ?? null,
-      data.avatar_url !== undefined, data.avatar_url ?? null,
-      data.default_coop_id !== undefined, data.default_coop_id ?? null,
-      data.fcm_token !== undefined, data.fcm_token ?? null, id],
+    [
+      data.name !== undefined,
+      data.name ?? null,
+      data.phone !== undefined,
+      data.phone ?? null,
+      data.avatar_url !== undefined,
+      data.avatar_url ?? null,
+      data.default_coop_id !== undefined,
+      data.default_coop_id ?? null,
+      data.fcm_token !== undefined,
+      data.fcm_token ?? null,
+      id,
+    ],
   );
 }
 
@@ -146,13 +154,16 @@ async function clearDeleteOtp(userId) {
 }
 
 async function lockById(userId, connection) {
-  const [rows] = await connection.query("SELECT id FROM users WHERE id = ? FOR UPDATE", [userId]);
+  const [rows] = await connection.query(
+    "SELECT id FROM users WHERE id = ? FOR UPDATE",
+    [userId],
+  );
   return rows[0] || null;
 }
 
 async function hasBusinessReferences(userId, connection = db) {
   const [[references]] = await connection.query(
-      `SELECT
+    `SELECT
          EXISTS(SELECT 1 FROM farms WHERE owner_user_id = ?) OR
          EXISTS(SELECT 1 FROM farm_members WHERE user_id = ?) OR
          EXISTS(SELECT 1 FROM flock_events WHERE recorded_by = ?) OR
@@ -160,7 +171,7 @@ async function hasBusinessReferences(userId, connection = db) {
          EXISTS(SELECT 1 FROM notifications WHERE user_id = ?) OR
          EXISTS(SELECT 1 FROM relay_commands WHERE requested_by = ?) OR
          EXISTS(SELECT 1 FROM ai_conversations WHERE user_id = ?) AS has_history`,
-      [userId, userId, userId, userId, userId, userId, userId],
+    [userId, userId, userId, userId, userId, userId, userId],
   );
   return Boolean(references.has_history);
 }

@@ -16,7 +16,12 @@ async function detail(user, coopId) {
 async function create(user, data) {
   return withTransaction(async (connection) => {
     await accessModel.lockFarm(data.farm_id, connection);
-    const farm = await access.requireFarm(user, data.farm_id, "manage", connection);
+    const farm = await access.requireFarm(
+      user,
+      data.farm_id,
+      "manage",
+      connection,
+    );
     if (!farm.is_active) throw httpError(409, "Farm is inactive");
     const coopId = await model.create(data, connection);
     await accessModel.lockUser(user.id, connection);
@@ -30,9 +35,15 @@ async function update(user, coopId, data) {
     await access.lockCoop(connection, coopId);
     const coop = await access.requireCoop(user, coopId, "manage", connection);
     const active = await model.activeCycle(coopId, connection);
-    if (data.status === "active" && !coop.farm_is_active) throw httpError(409, "Farm is inactive");
-    if (active && data.status === "inactive") throw httpError(409, "Coop has an active flock cycle");
-    if (active && data.capacity_birds != null && data.capacity_birds < Number(active.current_population)) {
+    if (data.status === "active" && !coop.farm_is_active)
+      throw httpError(409, "Farm is inactive");
+    if (active && data.status === "inactive")
+      throw httpError(409, "Coop has an active flock cycle");
+    if (
+      active &&
+      data.capacity_birds != null &&
+      data.capacity_birds < Number(active.current_population)
+    ) {
       throw httpError(409, "Capacity is below the active flock population");
     }
     await model.update(coopId, { ...coop, ...data }, connection);

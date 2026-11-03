@@ -8,15 +8,23 @@ const fields = {
   description: z.string().max(16000).nullable(),
   status: z.enum(["active", "inactive"]),
 };
-const createSchema = z.object({
-  farm_id: id,
-  ...fields,
-  capacity_birds: fields.capacity_birds.default(null),
-  description: fields.description.default(null),
-  status: fields.status.default("active"),
-}).strict();
-const updateSchema = z.object(fields).partial().strict()
-  .refine((value) => Object.keys(value).length > 0, "Provide at least one field");
+const createSchema = z
+  .object({
+    farm_id: id,
+    ...fields,
+    capacity_birds: fields.capacity_birds.default(null),
+    description: fields.description.default(null),
+    status: fields.status.default("active"),
+  })
+  .strict();
+const updateSchema = z
+  .object(fields)
+  .partial()
+  .strict()
+  .refine(
+    (value) => Object.keys(value).length > 0,
+    "Provide at least one field",
+  );
 const querySchema = listQuery.extend({ farm_id: id.optional() }).strict();
 
 module.exports = { idParam, createSchema, updateSchema, querySchema };

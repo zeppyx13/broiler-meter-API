@@ -15,12 +15,14 @@ const updateUserAdminSchema = z
     message: "At least one field is required",
   });
 
-const listUsersQuerySchema = z.object({
-  page: z.coerce.number().int().positive().max(1000000).optional().default(1),
-  limit: z.coerce.number().int().positive().max(100).optional().default(10),
-  role: z.enum(["operator", "admin", "manager"]).optional(),
-  search: z.string().max(190).optional(),
-}).strict();
+const listUsersQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().max(1000000).optional().default(1),
+    limit: z.coerce.number().int().positive().max(100).optional().default(10),
+    role: z.enum(["operator", "admin", "manager"]).optional(),
+    search: z.string().max(190).optional(),
+  })
+  .strict();
 
 module.exports = {
   userIdParamSchema,
