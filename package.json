@@ -10,6 +10,7 @@
     "test": "node --test tests/*.test.js",
     "test:integration": "node --test tests/broiler.integration.js",
     "test:phase2": "node --test tests/iotBroiler.integration.js",
+    "test:phase3": "node --test tests/guard.integration.js tests/notificationBroiler.integration.js tests/relayBroiler.integration.js",
     "mqtt:smoke": "node src/scripts/smoke_broiler_mqtt.js",
     "db:verify": "node src/scripts/verify_broiler_db.js",
     "seed:demo": "node src/scripts/seed_broiler_demo.js",

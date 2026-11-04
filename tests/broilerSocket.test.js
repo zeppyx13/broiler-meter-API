@@ -35,7 +35,7 @@ test(
           statusCode: 403,
         });
       }
-      return { id: coopId };
+      return { id: coopId, member_role: "operator" };
     });
     const server = http.createServer();
     const io = new Server(server, { serveClient: false });
@@ -346,6 +346,86 @@ test(
       );
 
       await t.test(
+        "phase3 alert and relay events are scoped and notification events target only their recipient",
+        async () => {
+          let others = 0;
+          let adminInbox = 0;
+          second.on("alert_created", () => others++);
+          second.on("relay_state_update", () => others++);
+          second.on("notification_created", () => others++);
+          admin.on("notification_created", () => adminInbox++);
+          for (const [event, extra] of [
+            [
+              "alert_created",
+              {
+                id: 55,
+                status: "active",
+                source: "simulation",
+                title: "Simulation alert",
+              },
+            ],
+            [
+              "alert_updated",
+              { id: 55, status: "acknowledged", source: "simulation" },
+            ],
+            [
+              "relay_state_update",
+              { relay_id: 6, reported_state: "off", desired_state: "unknown" },
+            ],
+            [
+              "relay_command_update",
+              {
+                relay_id: 6,
+                status: "published",
+                command: "off",
+                correlation_id: "server-id",
+              },
+            ],
+          ]) {
+            const incoming = received(first, event);
+            assert.equal(
+              (
+                await service.publish(io, event, {
+                  coop_id: 10,
+                  ...extra,
+                  token: "private",
+                  raw: "private",
+                })
+              ).delivered,
+              2,
+            );
+            assert.equal(
+              JSON.stringify(await incoming).includes("private"),
+              false,
+            );
+          }
+          await acknowledge(first, "coop:unsubscribe", { coop_id: 10 });
+          const inbox = received(first, "notification_created");
+          assert.equal(
+            (
+              await service.publish(io, "notification_created", {
+                coop_id: 10,
+                user_id: 1,
+                id: 56,
+                channel: "in_app",
+                title: "Simulation",
+                source: "simulation",
+                smtp_password: "private",
+                email: "private",
+              })
+            ).delivered,
+            1,
+          );
+          assert.equal((await inbox).id, 56);
+          await barrier(second);
+          await barrier(admin);
+          assert.equal(others, 0);
+          assert.equal(adminInbox, 0);
+          await acknowledge(first, "coop:subscribe", { coop_id: 10 });
+        },
+      );
+
+      await t.test(
         "membership revocation removes an existing subscriber before the next update",
         async () => {
           allowed.get(1).delete(10);
@@ -362,6 +442,18 @@ test(
           assert.deepEqual(await revoke, { coop_id: 10 });
           await barrier(first);
           assert.equal(updates, 0);
+          assert.equal(
+            (
+              await service.publish(io, "notification_created", {
+                coop_id: 10,
+                user_id: 1,
+                id: 57,
+                channel: "in_app",
+                title: "Revoked",
+              })
+            ).delivered,
+            0,
+          );
           assert.equal(
             io.sockets.sockets.get(first.id).rooms.has("coop:10"),
             false,

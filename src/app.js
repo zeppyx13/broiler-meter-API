@@ -71,6 +71,12 @@ if (isBroiler) {
   app.use("/api/devices", require("./routes/device.routes"));
   app.use("/api/meters", require("./routes/meterBroiler.routes"));
   app.use("/api/dashboard", require("./routes/dashboardMonitoring.routes"));
+  const guardRoutes = require("./routes/guard.routes");
+  app.use("/api/alert-rules", guardRoutes.rulesRouter);
+  app.use("/api/alerts", guardRoutes.alertsRouter);
+  app.use("/api/guard", guardRoutes.statusRouter);
+  app.use("/api/notifications", require("./routes/notificationBroiler.routes"));
+  app.use("/api/relays", require("./routes/relayBroiler.routes"));
 } else {
   // Retain legacy routes without loading their MQTT/payment/AI dependencies in broiler mode.
   app.use("/api/rooms", require("./routes/room.routes"));

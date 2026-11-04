@@ -3,6 +3,15 @@ const db = require("../config/db");
 const withTransaction = require("../utils/transaction");
 
 async function updateMe(userId, payload) {
+  if (
+    process.env.DB_NAME === "coasther_broiler" &&
+    Object.hasOwn(payload, "fcm_token")
+  ) {
+    throw require("../utils/httpError")(
+      400,
+      "Mobile push is not supported in Broiler mode",
+    );
+  }
   return withTransaction(async (connection) => {
     const access = require("./access.service");
     if (payload.default_coop_id != null) {

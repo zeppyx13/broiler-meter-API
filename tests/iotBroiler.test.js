@@ -34,7 +34,7 @@ test("firmware payload parsing strips private fields and normalizes WITA to UTC 
   assert.equal(telemetry.payload.voltage, 220);
   assert.equal("wifi_ssid" in telemetry.payload, false);
   assert.equal("room_id" in telemetry.payload, false);
-  assert.equal("relay_cutoff" in telemetry.payload, false);
+  assert.equal(telemetry.payload.relay_cutoff, true);
 });
 
 test("MQTT parser rejects invalid types, bounds, naive timestamps and oversized payloads", () => {
@@ -57,9 +57,8 @@ test("MQTT parser rejects invalid types, bounds, naive timestamps and oversized 
     null,
   );
   assert.equal(validator.parseMessage("unknown/topic", "{}"), null);
-  assert.equal(
-    validator.parseMessage("coasther/device/room1/control-status", "{}").kind,
-    "diagnostic",
+  assert.throws(() =>
+    validator.parseMessage("coasther/device/room1/control-status", "{}"),
   );
 });
 

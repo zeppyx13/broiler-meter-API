@@ -2,6 +2,9 @@ const mqtt = require("mqtt");
 const logger = require("./logger");
 const service = require("../services/iotBroiler.service");
 const diagnostics = require("../utils/mqttDiagnostics");
+const phase3 = require("../services/broilerPhase3Runtime.service");
+const relays = require("../services/relayBroiler.service");
+let activeRuntime = null;
 
 const topics = [
   "coasther/meter/+/reading",
@@ -11,9 +14,32 @@ const topics = [
 ];
 
 function start({ io, connect = mqtt.connect } = {}) {
+  if (activeRuntime) return activeRuntime;
+  phase3.configure({ io });
+  // One timer drives independent jobs, even if MQTT is unavailable/offline.
+  // SMTP has its own in-flight gate and cannot hold the Guard watchdog.
+  const timer = setInterval(() => {
+    void phase3.tick();
+  }, 30000);
+  timer.unref();
+  let client = null;
+  activeRuntime = {
+    get client() {
+      return client;
+    },
+    async stop() {
+      clearInterval(timer);
+      relays.configure();
+      await phase3.stop();
+      if (client)
+        await new Promise((resolve) => client.end(false, {}, resolve));
+      activeRuntime = null;
+    },
+  };
+  relays.configure({ io });
   if (process.env.BROILER_MQTT_ENABLED === "false") {
     logger.info("Broiler MQTT disabled by environment");
-    return { client: null, async stop() {} };
+    return activeRuntime;
   }
   if (
     !process.env.MQTT_HOST ||
@@ -21,9 +47,9 @@ function start({ io, connect = mqtt.connect } = {}) {
     !process.env.MQTT_PASSWORD
   ) {
     logger.warn("Broiler MQTT not started: MQTT environment is incomplete");
-    return { client: null, async stop() {} };
+    return activeRuntime;
   }
-  const client = connect({
+  client = connect({
     host: process.env.MQTT_HOST,
     port: Number(process.env.MQTT_PORT || 8883),
     username: process.env.MQTT_USERNAME,
@@ -33,12 +59,21 @@ function start({ io, connect = mqtt.connect } = {}) {
     reconnectPeriod: 5000,
     connectTimeout: 15000,
     resubscribe: false,
+    queueQoSZero: false,
   });
+  relays.configure({ client, io });
   client.on("connect", () => {
     logger.info(`Broiler MQTT connected pid=${process.pid}`);
     client.subscribe(topics, { qos: 1 }, (error, grants) => {
       if (error || grants?.some((grant) => grant.qos === 128))
-        diagnostics.report({ stage: "mqtt_subscribe", outcome: "subscription_failed", reason_code: "MQTT_SUBSCRIPTION_FAILED" }, error);
+        diagnostics.report(
+          {
+            stage: "mqtt_subscribe",
+            outcome: "subscription_failed",
+            reason_code: "MQTT_SUBSCRIPTION_FAILED",
+          },
+          error,
+        );
       else logger.info("Broiler MQTT subscriptions ready (4 legacy patterns)");
     });
   });
@@ -51,28 +86,18 @@ function start({ io, connect = mqtt.connect } = {}) {
       retained: Boolean(packet?.retain),
     });
   });
-  client.on("error", (error) => diagnostics.report({ stage: "mqtt_connect", outcome: "connection_error", reason_code: "MQTT_CONNECTION_ERROR" }, error));
+  client.on("error", (error) =>
+    diagnostics.report(
+      {
+        stage: "mqtt_connect",
+        outcome: "connection_error",
+        reason_code: "MQTT_CONNECTION_ERROR",
+      },
+      error,
+    ),
+  );
   client.on("reconnect", () => logger.info("Broiler MQTT reconnecting"));
-  let checking = false;
-  const timer = setInterval(async () => {
-    if (checking) return;
-    checking = true;
-    try {
-      await service.checkDeviceStatus(io);
-    } catch (error) {
-      diagnostics.report({ stage: "device_timeout", outcome: "device_timeout", reason_code: "DEVICE_TIMEOUT_CHECK_FAILED" }, error);
-    } finally {
-      checking = false;
-    }
-  }, 30000);
-  timer.unref();
-  return {
-    client,
-    async stop() {
-      clearInterval(timer);
-      await new Promise((resolve) => client.end(false, {}, resolve));
-    },
-  };
+  return activeRuntime;
 }
 
 module.exports = { start, topics };

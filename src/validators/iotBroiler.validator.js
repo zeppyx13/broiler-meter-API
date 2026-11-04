@@ -25,11 +25,12 @@ const telemetrySchema = z
     frequency: z.number().finite().min(0).max(99999.999).optional(),
     pf: z.number().finite().min(0).max(1).optional(),
     ntp_synced: z.boolean().optional(),
+    relay_cutoff: z.boolean().optional(),
   })
   .refine(
     (value) =>
       Object.keys(value).some(
-        (key) => !["recorded_at", "ntp_synced"].includes(key),
+        (key) => !["recorded_at", "ntp_synced", "relay_cutoff"].includes(key),
       ),
     "Telemetry must contain a measurement",
   );
@@ -54,9 +55,18 @@ function parseMessage(topic, message) {
   const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
   if (buffer.length > 16384) throw new Error("payload_too_large");
   // Diagnostic text is nonessential and firmware does not escape arbitrary log strings as JSON.
-  // Classify it before parsing; never store or forward raw log/control-status content.
-  if (kind === "device") return { kind: "diagnostic", key, action };
+  // Classify log text before parsing; relay status now has its own strict allowlisted contract.
+  if (kind === "device" && action === "log")
+    return { kind: "diagnostic", key, action };
   const raw = JSON.parse(buffer.toString("utf8"));
+  if (kind === "device")
+    return {
+      kind: "control_status",
+      key,
+      payload: require("./relayBroiler.validator").controlStatusSchema.parse(
+        raw,
+      ),
+    };
   return {
     kind,
     key,

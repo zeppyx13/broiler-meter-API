@@ -449,8 +449,16 @@ test(
           );
           await request("PUT", "/api/users/me", operator.token, {
             default_coop_id: coop.id,
-            fcm_token: "synthetic-test-token",
           });
+          await request(
+            "PUT",
+            "/api/users/me",
+            operator.token,
+            {
+              fcm_token: "synthetic-test-token",
+            },
+            400,
+          );
           await request("PUT", `/api/coops/${coop.id}`, manager.token, {
             description: "Updated test coop",
           });
@@ -1090,7 +1098,6 @@ test(
             "/api/iot/live-status",
             "/api/scheduler/status",
             "/api/ai",
-            "/api/notifications",
           ]) {
             await request("GET", path, admin.token, null, 404);
           }

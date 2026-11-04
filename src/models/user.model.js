@@ -42,6 +42,28 @@ async function createUser({
 }
 
 async function updateById(id, data, connection = db) {
+  if (process.env.DB_NAME === "coasther_broiler") {
+    await connection.query(
+      `UPDATE users SET
+         name = CASE WHEN ? THEN ? ELSE name END,
+         phone = CASE WHEN ? THEN ? ELSE phone END,
+         avatar_url = CASE WHEN ? THEN ? ELSE avatar_url END,
+         default_coop_id = CASE WHEN ? THEN ? ELSE default_coop_id END
+       WHERE id = ?`,
+      [
+        data.name !== undefined,
+        data.name ?? null,
+        data.phone !== undefined,
+        data.phone ?? null,
+        data.avatar_url !== undefined,
+        data.avatar_url ?? null,
+        data.default_coop_id !== undefined,
+        data.default_coop_id ?? null,
+        id,
+      ],
+    );
+    return;
+  }
   await connection.query(
     `UPDATE users SET
        name = CASE WHEN ? THEN ? ELSE name END,

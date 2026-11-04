@@ -6,6 +6,8 @@ const { classify } = require("../utils/meterCounter");
 const { parseMessage } = require("../validators/iotBroiler.validator");
 const diagnostics = require("../utils/mqttDiagnostics");
 const metricsRefresh = require("./mqttMetricsRefresh.service");
+const phase3 = require("./broilerPhase3Runtime.service");
+const inputHealth = require("../utils/iotInputHealth");
 const { staleSeconds } = require("../utils/deviceStatus");
 
 const measurementFields = {
@@ -42,7 +44,11 @@ async function ingestReading(
   context.stage = "mapping";
   const mapping = await model.meterByUid(key);
   if (!mapping) return { outcome: "unmapped" };
-  Object.assign(context, { coop_id: mapping.coop_id, device_id: mapping.device_id, meter_id: mapping.id });
+  Object.assign(context, {
+    coop_id: mapping.coop_id,
+    device_id: mapping.device_id,
+    meter_id: mapping.id,
+  });
   context.stage = "tx_lock";
   const result = await withTransaction(async (connection) => {
     const coop = await access.lockCoop(connection, mapping.coop_id);
@@ -70,12 +76,12 @@ async function ingestReading(
         : null;
     context.stage = "dedup";
     const duplicate = await model.duplicate(
-        meter.id,
-        payload.reading_value,
-        payload.recorded_at,
-        source,
-        connection,
-      );
+      meter.id,
+      payload.reading_value,
+      payload.recorded_at,
+      source,
+      connection,
+    );
     if (duplicate) {
       return {
         outcome: "duplicate",
@@ -137,15 +143,26 @@ async function ingestReading(
     return { outcome: "stored", ...reading };
   });
   context.stage = "post_commit";
+  void phase3.enqueue(result, null, { io, source, receivedAt });
   if (result.outcome === "stored") {
-    Object.assign(context, { persisted: true, reading_id: result.id, flock_cycle_id: result.flock_cycle_id });
-    result.metrics_refresh = await metricsRefresh.refresh(result, { ...context });
+    Object.assign(context, {
+      persisted: true,
+      reading_id: result.id,
+      flock_cycle_id: result.flock_cycle_id,
+    });
+    result.metrics_refresh = await metricsRefresh.refresh(result, {
+      ...context,
+    });
     context.stage = "socket_emit";
     await publish(io, "meter_update", result);
   } else if (result.outcome === "duplicate") {
     // Replayed delivery can repair a previously failed cache without adding another raw reading.
-    result.metrics_refresh = await metricsRefresh.refresh(result, { ...context, persisted: true,
-      reading_id: result.id, flock_cycle_id: result.flock_cycle_id });
+    result.metrics_refresh = await metricsRefresh.refresh(result, {
+      ...context,
+      persisted: true,
+      reading_id: result.id,
+      flock_cycle_id: result.flock_cycle_id,
+    });
   }
   if (result.last_seen_at && ["stored", "duplicate"].includes(result.outcome)) {
     context.stage = "socket_emit";
@@ -262,6 +279,7 @@ async function ingestTelemetry(
       last_seen_at: lastSeen,
     };
   });
+  void phase3.enqueue(result, payload, { io, source, receivedAt });
   if (result.outcome === "stored") {
     context.persisted = true;
     context.stage = "socket_emit";
@@ -288,13 +306,35 @@ async function ingestTelemetry(
 async function handleMessage(
   topic,
   message,
-  { source = "mqtt", receivedAt = new Date(), io, heartbeat = true, retained = false } = {},
+  {
+    source = "mqtt",
+    receivedAt = new Date(),
+    io,
+    heartbeat = true,
+    retained = false,
+  } = {},
 ) {
   const parts = typeof topic === "string" ? topic.split("/") : [];
-  const kind = parts[1] === "device" ? (parts[3] === "log" ? "device_log" : "control_status")
-    : ["meter", "telemetry"].includes(parts[1]) ? parts[1] : "unknown";
-  const context = { topic, kind, source, retained, stage: "topic",
-    payload_bytes: Buffer.isBuffer(message) ? message.length : typeof message === "string" ? Buffer.byteLength(message) : 0 };
+  const kind =
+    parts[1] === "device"
+      ? parts[3] === "log"
+        ? "device_log"
+        : "control_status"
+      : ["meter", "telemetry"].includes(parts[1])
+        ? parts[1]
+        : "unknown";
+  const context = {
+    topic,
+    kind,
+    source,
+    retained,
+    stage: "topic",
+    payload_bytes: Buffer.isBuffer(message)
+      ? message.length
+      : typeof message === "string"
+        ? Buffer.byteLength(message)
+        : 0,
+  };
   try {
     if (!["mqtt", "simulation"].includes(source))
       return { outcome: "invalid_source" };
@@ -303,23 +343,56 @@ async function handleMessage(
     if (!parsed) return { outcome: "unknown_topic" };
     // Raw diagnostic payloads can contain Wi-Fi credentials or command tokens. Do not persist or forward them.
     if (parsed.kind === "diagnostic") return { outcome: "diagnostic_ignored" };
+    if (parsed.kind === "control_status") {
+      context.stage = "relay_observation";
+      return await require("./relayBroiler.service").observeControlStatus(
+        parsed.key,
+        parsed.payload,
+        { io, source, receivedAt, retained },
+      );
+    }
     context.stage = "timestamp";
     if (
       parsed.payload.recorded_at.getTime() > receivedAt.getTime() + 300000 ||
       parsed.payload.recorded_at.getUTCFullYear() < 2000
-    )
-      {
-        diagnostics.report({ ...context, outcome: "invalid_timestamp", reason_code: "INVALID_TIMESTAMP" });
-        return { outcome: "invalid_timestamp" };
-      }
-    const result = await (parsed.kind === "meter" ? ingestReading : ingestTelemetry)(
-      parsed.key,
-      parsed.payload,
-      { source, receivedAt, io, heartbeat, context },
-    );
-    if (result.outcome === "unmapped") diagnostics.report({ ...context, outcome: "unmapped", reason_code: "UNMAPPED" });
+    ) {
+      if (parsed.kind === "telemetry" && source === "mqtt" && !retained)
+        inputHealth.recordInvalidTimestamp(parsed.key, receivedAt);
+      diagnostics.report({
+        ...context,
+        outcome: "invalid_timestamp",
+        reason_code: "INVALID_TIMESTAMP",
+      });
+      return { outcome: "invalid_timestamp" };
+    }
+    if (parsed.kind === "telemetry" && source === "mqtt" && !retained)
+      inputHealth.clear(parsed.key);
+    const result = await (
+      parsed.kind === "meter" ? ingestReading : ingestTelemetry
+    )(parsed.key, parsed.payload, {
+      source,
+      receivedAt,
+      io,
+      heartbeat,
+      context,
+    });
+    if (result.outcome === "unmapped")
+      diagnostics.report({
+        ...context,
+        outcome: "unmapped",
+        reason_code: "UNMAPPED",
+      });
     return result;
   } catch (error) {
+    if (
+      kind === "telemetry" &&
+      source === "mqtt" &&
+      !retained &&
+      error.name === "ZodError" &&
+      error.issues?.some((issue) => issue.path?.[0] === "recorded_at")
+    ) {
+      inputHealth.recordInvalidTimestamp(parts[2], receivedAt);
+    }
     // Never echo raw payload, identifiers from untrusted input, connection credentials or error SQL values.
     const outcome =
       error.name === "ZodError" ||
@@ -329,9 +402,23 @@ async function handleMessage(
         : "processing_error";
     if (error.name === "ZodError") context.stage = "validation";
     else if (error instanceof SyntaxError) context.stage = "json";
-    diagnostics.report({ ...context, outcome, reason_code: outcome === "invalid_payload"
-      ? error.name === "ZodError" ? "VALIDATION_ERROR" : error instanceof SyntaxError ? "JSON_PARSE_ERROR" : "INVALID_PAYLOAD"
-      : context.stage === "socket_emit" ? "SOCKET_EMIT_FAILED" : "PROCESSING_ERROR" }, error);
+    diagnostics.report(
+      {
+        ...context,
+        outcome,
+        reason_code:
+          outcome === "invalid_payload"
+            ? error.name === "ZodError"
+              ? "VALIDATION_ERROR"
+              : error instanceof SyntaxError
+                ? "JSON_PARSE_ERROR"
+                : "INVALID_PAYLOAD"
+            : context.stage === "socket_emit"
+              ? "SOCKET_EMIT_FAILED"
+              : "PROCESSING_ERROR",
+      },
+      error,
+    );
     return { outcome };
   }
 }

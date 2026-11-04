@@ -12,7 +12,9 @@ const updateMeSchema = z
       .max(Number.MAX_SAFE_INTEGER)
       .nullable()
       .optional(),
-    fcm_token: z.string().min(1).max(255).nullable().optional(),
+    ...(process.env.DB_NAME === "coasther_broiler"
+      ? {}
+      : { fcm_token: z.string().min(1).max(255).nullable().optional() }),
   })
   .strict()
   .refine((data) => Object.keys(data).length > 0, {

@@ -18,6 +18,97 @@ const commonFields = [
   "is_latest",
 ];
 const eventFields = {
+  alert_created: [
+    "id",
+    "coop_id",
+    "device_id",
+    "alert_rule_id",
+    "flock_cycle_id",
+    "alert_type",
+    "severity",
+    "status",
+    "title",
+    "message",
+    "source",
+    "detected_at",
+    "acknowledged_by",
+    "acknowledged_at",
+    "resolved_at",
+  ],
+  alert_updated: [
+    "id",
+    "coop_id",
+    "device_id",
+    "alert_rule_id",
+    "flock_cycle_id",
+    "alert_type",
+    "severity",
+    "status",
+    "title",
+    "message",
+    "source",
+    "detected_at",
+    "acknowledged_by",
+    "acknowledged_at",
+    "resolved_at",
+  ],
+  notification_created: [
+    "id",
+    "coop_id",
+    "user_id",
+    "alert_id",
+    "channel",
+    "title",
+    "body",
+    "delivery_status",
+    "sent_at",
+    "read_at",
+    "created_at",
+    "source",
+  ],
+  notification_updated: [
+    "id",
+    "coop_id",
+    "user_id",
+    "alert_id",
+    "channel",
+    "title",
+    "body",
+    "delivery_status",
+    "sent_at",
+    "read_at",
+    "created_at",
+    "source",
+  ],
+  notification_unread_count: ["coop_id", "user_id", "unread_count"],
+  relay_state_update: [
+    "id",
+    "coop_id",
+    "device_id",
+    "relay_id",
+    "channel",
+    "desired_state",
+    "reported_state",
+    "last_reported_at",
+    "observed_at",
+    "source",
+    "retained",
+  ],
+  relay_command_update: [
+    "id",
+    "coop_id",
+    "device_id",
+    "relay_id",
+    "correlation_id",
+    "command",
+    "status",
+    "source",
+    "requested_by",
+    "requested_at",
+    "published_at",
+    "acked_at",
+    "failure_reason",
+  ],
   meter_update: [
     ...commonFields,
     "meter_id",
@@ -215,7 +306,20 @@ async function publish(io, event, payload) {
   }
   const namespace = io.of("/");
   const room = roomName(coop_id);
-  const memberIds = [...(namespace.adapter.rooms.get(room) || [])];
+  const personal = event.startsWith("notification_");
+  if (
+    personal &&
+    (!Number.isSafeInteger(payload.user_id) || payload.user_id < 1)
+  )
+    throw new Error("Notification recipient is required");
+  // Inbox events target the recipient's open browsers, including when a different coop is selected.
+  const memberIds = personal
+    ? [...namespace.sockets.values()]
+        .filter(
+          (socket) => Number(socket.data.broilerUserId) === payload.user_id,
+        )
+        .map((socket) => socket.id)
+    : [...(namespace.adapter.rooms.get(room) || [])];
   let delivered = 0;
   await Promise.all(
     memberIds.map(async (id) => {
@@ -224,8 +328,14 @@ async function publish(io, event, payload) {
       try {
         // Membership and global role can change while a socket remains connected.
         const user = await currentUser(socket);
-        await access.requireCoop(user, coop_id);
-        if (socket.connected && socket.rooms.has(room)) {
+        if (personal && Number(user.id) !== payload.user_id) return;
+        const coop = await access.requireCoop(user, coop_id);
+        if (
+          personal &&
+          !["owner", "manager", "operator"].includes(coop.member_role)
+        )
+          return;
+        if (socket.connected && (personal || socket.rooms.has(room))) {
           socket.emit(event, orderedEnvelope(socket, event, envelope));
           delivered++;
         }
