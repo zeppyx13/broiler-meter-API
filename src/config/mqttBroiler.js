@@ -1,6 +1,7 @@
 const mqtt = require("mqtt");
 const logger = require("./logger");
 const service = require("../services/iotBroiler.service");
+const diagnostics = require("../utils/mqttDiagnostics");
 
 const topics = [
   "coasther/meter/+/reading",
@@ -34,10 +35,10 @@ function start({ io, connect = mqtt.connect } = {}) {
     resubscribe: false,
   });
   client.on("connect", () => {
-    logger.info("Broiler MQTT connected");
+    logger.info(`Broiler MQTT connected pid=${process.pid}`);
     client.subscribe(topics, { qos: 1 }, (error, grants) => {
       if (error || grants?.some((grant) => grant.qos === 128))
-        logger.warn("Broiler MQTT subscription failed");
+        diagnostics.report({ stage: "mqtt_subscribe", outcome: "subscription_failed", reason_code: "MQTT_SUBSCRIPTION_FAILED" }, error);
       else logger.info("Broiler MQTT subscriptions ready (4 legacy patterns)");
     });
   });
@@ -47,9 +48,10 @@ function start({ io, connect = mqtt.connect } = {}) {
     void service.handleMessage(topic, message, {
       io,
       heartbeat: !packet?.retain,
+      retained: Boolean(packet?.retain),
     });
   });
-  client.on("error", () => logger.warn("Broiler MQTT connection error"));
+  client.on("error", (error) => diagnostics.report({ stage: "mqtt_connect", outcome: "connection_error", reason_code: "MQTT_CONNECTION_ERROR" }, error));
   client.on("reconnect", () => logger.info("Broiler MQTT reconnecting"));
   let checking = false;
   const timer = setInterval(async () => {
@@ -57,8 +59,8 @@ function start({ io, connect = mqtt.connect } = {}) {
     checking = true;
     try {
       await service.checkDeviceStatus(io);
-    } catch {
-      logger.warn("Broiler device timeout check deferred");
+    } catch (error) {
+      diagnostics.report({ stage: "device_timeout", outcome: "device_timeout", reason_code: "DEVICE_TIMEOUT_CHECK_FAILED" }, error);
     } finally {
       checking = false;
     }

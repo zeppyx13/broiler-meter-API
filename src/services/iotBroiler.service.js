@@ -4,7 +4,8 @@ const withTransaction = require("../utils/transaction");
 const { localDate } = require("../utils/farmDate");
 const { classify } = require("../utils/meterCounter");
 const { parseMessage } = require("../validators/iotBroiler.validator");
-const logger = require("../config/logger");
+const diagnostics = require("../utils/mqttDiagnostics");
+const metricsRefresh = require("./mqttMetricsRefresh.service");
 const { staleSeconds } = require("../utils/deviceStatus");
 
 const measurementFields = {
@@ -33,24 +34,16 @@ async function publish(io, event, payload) {
   if (io) await require("./broilerSocket.service").publish(io, event, payload);
 }
 
-async function refreshMetrics(result) {
-  if (result?.flock_cycle_id) {
-    try {
-      await require("./dailyMetrics.service").recalculateForReading(result);
-    } catch {
-      // Raw reading is committed. Dashboard reads rebuild metrics, so a cache failure is retryable.
-      logger.warn("Broiler metrics refresh deferred");
-    }
-  }
-}
-
 async function ingestReading(
   key,
   payload,
-  { source, receivedAt, io, heartbeat },
+  { source, receivedAt, io, heartbeat, context },
 ) {
+  context.stage = "mapping";
   const mapping = await model.meterByUid(key);
   if (!mapping) return { outcome: "unmapped" };
+  Object.assign(context, { coop_id: mapping.coop_id, device_id: mapping.device_id, meter_id: mapping.id });
+  context.stage = "tx_lock";
   const result = await withTransaction(async (connection) => {
     const coop = await access.lockCoop(connection, mapping.coop_id);
     const device = await model.lockDevice(mapping.device_id, connection);
@@ -70,32 +63,40 @@ async function ingestReading(
     ) {
       return { outcome: "invalid_mapping" };
     }
+    context.stage = "heartbeat";
     const lastSeen =
       source !== "simulation" && heartbeat
         ? await model.seen(device.id, receivedAt, connection)
         : null;
-    if (
-      await model.duplicate(
+    context.stage = "dedup";
+    const duplicate = await model.duplicate(
         meter.id,
         payload.reading_value,
         payload.recorded_at,
         source,
         connection,
-      )
-    ) {
+      );
+    if (duplicate) {
       return {
         outcome: "duplicate",
         coop_id: device.coop_id,
         device_id: device.id,
         last_seen_at: lastSeen,
+        flock_cycle_id: duplicate.flock_cycle_id,
+        recorded_at: duplicate.recorded_at,
+        timezone: farm.timezone,
+        id: duplicate.id,
       };
     }
+    context.stage = "cursor";
     const previous = await model.cursor(meter.id, source, connection);
+    context.stage = "cycle_attribution";
     const cycleId = historicalCycle(
       await model.cycles(device.coop_id, connection),
       payload.recorded_at,
       farm.timezone,
     );
+    context.stage = "timestamp_conflict";
     const conflict = await model.timestampConflict(
       meter.id,
       payload.recorded_at,
@@ -124,17 +125,30 @@ async function ingestReading(
       received_at: receivedAt,
       source,
       last_seen_at: lastSeen,
+      timezone: farm.timezone,
     };
+    context.flock_cycle_id = cycleId;
+    context.stage = "insert";
     reading.id = await model.insertReading(reading, connection);
+    context.stage = "update";
     if (decision.is_latest && source !== "simulation")
       await model.updateCursor(reading, connection);
+    context.stage = "commit";
     return { outcome: "stored", ...reading };
   });
+  context.stage = "post_commit";
   if (result.outcome === "stored") {
-    await refreshMetrics(result);
+    Object.assign(context, { persisted: true, reading_id: result.id, flock_cycle_id: result.flock_cycle_id });
+    result.metrics_refresh = await metricsRefresh.refresh(result, { ...context });
+    context.stage = "socket_emit";
     await publish(io, "meter_update", result);
+  } else if (result.outcome === "duplicate") {
+    // Replayed delivery can repair a previously failed cache without adding another raw reading.
+    result.metrics_refresh = await metricsRefresh.refresh(result, { ...context, persisted: true,
+      reading_id: result.id, flock_cycle_id: result.flock_cycle_id });
   }
   if (result.last_seen_at && ["stored", "duplicate"].includes(result.outcome)) {
+    context.stage = "socket_emit";
     await publish(io, "device_status", {
       device_id: result.device_id,
       coop_id: result.coop_id,
@@ -192,10 +206,13 @@ function mergeSnapshot(existing, payload, device, source) {
 async function ingestTelemetry(
   key,
   payload,
-  { source, receivedAt, io, heartbeat },
+  { source, receivedAt, io, heartbeat, context },
 ) {
+  context.stage = "mapping";
   const mapping = await model.deviceByTopic(key);
   if (!mapping) return { outcome: "unmapped" };
+  Object.assign(context, { coop_id: mapping.coop_id, device_id: mapping.id });
+  context.stage = "tx_lock";
   const result = await withTransaction(async (connection) => {
     const coop = await access.lockCoop(connection, mapping.coop_id);
     const device = await model.lockDevice(mapping.id, connection);
@@ -203,10 +220,12 @@ async function ingestTelemetry(
     if (!device.is_active || coop.status !== "active" || !farm.is_active) {
       return { outcome: "disabled" };
     }
+    context.stage = "heartbeat";
     const lastSeen =
       source !== "simulation" && heartbeat
         ? await model.seen(device.id, receivedAt, connection)
         : null;
+    context.stage = "cursor";
     const existing = await model.snapshot(device.coop_id, connection);
     const snapshotSource = source === "simulation" ? "simulation" : "sensor";
     const newer =
@@ -228,7 +247,9 @@ async function ingestTelemetry(
         last_seen_at: lastSeen,
       };
     const snapshot = mergeSnapshot(existing, payload, device, snapshotSource);
+    context.stage = "update";
     await model.saveSnapshot(snapshot, connection);
+    context.stage = "commit";
     return {
       outcome: "stored",
       device_id: device.id,
@@ -241,12 +262,16 @@ async function ingestTelemetry(
       last_seen_at: lastSeen,
     };
   });
-  if (result.outcome === "stored")
+  if (result.outcome === "stored") {
+    context.persisted = true;
+    context.stage = "socket_emit";
     await publish(io, "telemetry_update", result);
+  }
   if (
     result.last_seen_at &&
     ["stored", "historical_telemetry"].includes(result.outcome)
   ) {
+    context.stage = "socket_emit";
     await publish(io, "device_status", {
       device_id: result.device_id,
       coop_id: result.coop_id,
@@ -263,25 +288,37 @@ async function ingestTelemetry(
 async function handleMessage(
   topic,
   message,
-  { source = "mqtt", receivedAt = new Date(), io, heartbeat = true } = {},
+  { source = "mqtt", receivedAt = new Date(), io, heartbeat = true, retained = false } = {},
 ) {
+  const parts = typeof topic === "string" ? topic.split("/") : [];
+  const kind = parts[1] === "device" ? (parts[3] === "log" ? "device_log" : "control_status")
+    : ["meter", "telemetry"].includes(parts[1]) ? parts[1] : "unknown";
+  const context = { topic, kind, source, retained, stage: "topic",
+    payload_bytes: Buffer.isBuffer(message) ? message.length : typeof message === "string" ? Buffer.byteLength(message) : 0 };
   try {
     if (!["mqtt", "simulation"].includes(source))
       return { outcome: "invalid_source" };
+    context.stage = "json";
     const parsed = parseMessage(topic, message);
     if (!parsed) return { outcome: "unknown_topic" };
     // Raw diagnostic payloads can contain Wi-Fi credentials or command tokens. Do not persist or forward them.
     if (parsed.kind === "diagnostic") return { outcome: "diagnostic_ignored" };
+    context.stage = "timestamp";
     if (
       parsed.payload.recorded_at.getTime() > receivedAt.getTime() + 300000 ||
       parsed.payload.recorded_at.getUTCFullYear() < 2000
     )
-      return { outcome: "invalid_timestamp" };
-    return await (parsed.kind === "meter" ? ingestReading : ingestTelemetry)(
+      {
+        diagnostics.report({ ...context, outcome: "invalid_timestamp", reason_code: "INVALID_TIMESTAMP" });
+        return { outcome: "invalid_timestamp" };
+      }
+    const result = await (parsed.kind === "meter" ? ingestReading : ingestTelemetry)(
       parsed.key,
       parsed.payload,
-      { source, receivedAt, io, heartbeat },
+      { source, receivedAt, io, heartbeat, context },
     );
+    if (result.outcome === "unmapped") diagnostics.report({ ...context, outcome: "unmapped", reason_code: "UNMAPPED" });
+    return result;
   } catch (error) {
     // Never echo raw payload, identifiers from untrusted input, connection credentials or error SQL values.
     const outcome =
@@ -290,7 +327,11 @@ async function handleMessage(
       ["payload_too_large", "invalid_topic"].includes(error.message)
         ? "invalid_payload"
         : "processing_error";
-    logger.warn(`Broiler MQTT message rejected: ${outcome}`);
+    if (error.name === "ZodError") context.stage = "validation";
+    else if (error instanceof SyntaxError) context.stage = "json";
+    diagnostics.report({ ...context, outcome, reason_code: outcome === "invalid_payload"
+      ? error.name === "ZodError" ? "VALIDATION_ERROR" : error instanceof SyntaxError ? "JSON_PARSE_ERROR" : "INVALID_PAYLOAD"
+      : context.stage === "socket_emit" ? "SOCKET_EMIT_FAILED" : "PROCESSING_ERROR" }, error);
     return { outcome };
   }
 }

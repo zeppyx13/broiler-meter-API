@@ -53,8 +53,10 @@ function parseMessage(topic, message) {
     return null;
   const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
   if (buffer.length > 16384) throw new Error("payload_too_large");
-  const raw = JSON.parse(buffer.toString("utf8"));
+  // Diagnostic text is nonessential and firmware does not escape arbitrary log strings as JSON.
+  // Classify it before parsing; never store or forward raw log/control-status content.
   if (kind === "device") return { kind: "diagnostic", key, action };
+  const raw = JSON.parse(buffer.toString("utf8"));
   return {
     kind,
     key,

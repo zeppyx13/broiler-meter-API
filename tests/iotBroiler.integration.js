@@ -808,6 +808,32 @@ test(
         },
       );
 
+      await t.test("duplicate delivery retries a transient refresh failure without another reading or double aggregation", async (subtest) => {
+        const before = await rawCount();
+        const [[existing]] = await db.query(
+          `SELECT reading_value, recorded_at FROM meter_readings WHERE meter_id = ?
+           AND source = 'simulation' AND reading_status = 'accepted' ORDER BY recorded_at DESC LIMIT 1`,
+          [water.id],
+        );
+        const calculate = daily.recalculateForReading;
+        let attempts = 0;
+        subtest.mock.method(daily, "recalculateForReading", async (value) => {
+          if (++attempts === 1) throw Object.assign(new Error("Injected transient refresh failure"), { code: "ER_LOCK_DEADLOCK" });
+          return calculate(value);
+        });
+        const result = await simulate(`coasther/meter/${water.meter_uid}/reading`, {
+          reading_value: Number(existing.reading_value), recorded_at: existing.recorded_at.toISOString(),
+        });
+        assert.equal(result.outcome, "duplicate");
+        assert.deepEqual(result.metrics_refresh, { status: "refreshed", attempts: 2 });
+        assert.equal(await rawCount(), before);
+        const [[metric]] = await db.query(
+          "SELECT COUNT(*) AS count, MAX(water_liters) AS water_liters FROM daily_coop_metrics WHERE flock_cycle_id = ?", [cycle.id],
+        );
+        assert.equal(Number(metric.count), 1);
+        assert.equal(Number(metric.water_liters), 17);
+      });
+
       await t.test(
         "dashboard defaults hide synthetic data while opt-in simulation remains explicit",
         async () => {

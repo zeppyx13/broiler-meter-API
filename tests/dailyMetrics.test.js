@@ -255,6 +255,7 @@ test("recalculation reruns replace the same day and real baselines prevent simul
   };
   t.mock.method(db, "getConnection", async () => connection);
   t.mock.method(access, "lockCoop", async () => {});
+  t.mock.method(model, "cycleLocation", async () => ({ coop_id: cycle.coop_id }));
   t.mock.method(model, "cycleById", async () => ({ ...cycle }));
   t.mock.method(model, "dayReadings", async () => [
     group({ accepted_count: 0, consumption: "0" }),
@@ -288,6 +289,7 @@ test("single-reading refresh recomputes the farm-local date after commit", async
   };
   t.mock.method(db, "getConnection", async () => connection);
   t.mock.method(access, "lockCoop", async () => {});
+  t.mock.method(model, "cycleLocation", async () => ({ coop_id: cycle.coop_id }));
   t.mock.method(model, "cycleById", async () => ({ ...cycle }));
   t.mock.method(model, "populationChanges", async () => 0);
   t.mock.method(model, "dayReadings", async (coop, id, start, end) => {
@@ -301,6 +303,42 @@ test("single-reading refresh recomputes the farm-local date after commit", async
     recorded_at: new Date("2026-11-03T16:30:00Z"),
   });
   assert.equal(result.real[0].metric_date, "2026-11-04");
+});
+
+test("cycle and reading refresh acquire parent locks before any joined locking context read", async (t) => {
+  const calls = [];
+  const connection = {
+    async beginTransaction() { calls.push("begin"); },
+    async commit() { calls.push("commit"); },
+    async rollback() {},
+    release() {},
+  };
+  let parentLocked = false;
+  t.mock.method(db, "getConnection", async () => connection);
+  t.mock.method(model, "cycleLocation", async () => {
+    calls.push("nonlocking_location");
+    return { coop_id: cycle.coop_id };
+  });
+  t.mock.method(access, "lockCoop", async (conn, id) => {
+    assert.equal(conn, connection);
+    assert.equal(id, cycle.coop_id);
+    parentLocked = true;
+    calls.push("farm_coop_locks");
+  });
+  t.mock.method(model, "cycleById", async (id, conn) => {
+    assert.equal(conn, connection);
+    assert.equal(parentLocked, true, "Joined locking reads must follow the parent locks");
+    calls.push("locked_cycle_context");
+    return { ...cycle };
+  });
+  t.mock.method(model, "dayReadings", async () => []);
+  t.mock.method(model, "populationChanges", async () => 0);
+  await daily.recalculateCycle({ flock_cycle_id: cycle.id, start_date: "2026-11-03", end_date: "2026-11-03" });
+  assert.deepEqual(calls.slice(0, 4), ["nonlocking_location", "begin", "farm_coop_locks", "locked_cycle_context"]);
+  calls.length = 0;
+  parentLocked = false;
+  await daily.recalculateForReading({ coop_id: cycle.coop_id, flock_cycle_id: cycle.id, recorded_at: new Date("2026-11-03T04:00:00Z") });
+  assert.deepEqual(calls.slice(0, 5), ["nonlocking_location", "nonlocking_location", "begin", "farm_coop_locks", "locked_cycle_context"]);
 });
 
 test("live snapshot masks stale individual fields and excludes simulation by default", () => {

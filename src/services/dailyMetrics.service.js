@@ -180,16 +180,20 @@ function buildDaily(cycle, date, population, groups, stream) {
   };
 }
 
-async function recalculateCycle({ flock_cycle_id, start_date, end_date }) {
-  const existing = await model.cycleById(flock_cycle_id);
+async function recalculateCycle({ flock_cycle_id, start_date, end_date, recorded_at }) {
+  // Route to the parent without taking a cycle lock before the canonical farm -> coop locks.
+  const existing = await model.cycleLocation(flock_cycle_id);
   if (!existing) throw httpError(404, "Flock cycle not found");
   return withTransaction(async (connection) => {
     await access.lockCoop(connection, existing.coop_id);
     const cycle = await model.cycleById(flock_cycle_id, connection);
     const today = localDate(cycle.timezone);
     const last = cycle.actual_harvest_date || today;
-    const start = start_date || cycle.placement_date;
-    const end = end_date || last;
+    const readingDate = recorded_at ? localDate(cycle.timezone, new Date(recorded_at)) : null;
+    if (readingDate && (readingDate < cycle.placement_date ||
+      (cycle.actual_harvest_date && readingDate > cycle.actual_harvest_date))) return { skipped: true };
+    const start = readingDate || start_date || cycle.placement_date;
+    const end = readingDate || end_date || last;
     if (start < cycle.placement_date || end > last) {
       throw httpError(
         400,
@@ -241,16 +245,10 @@ async function recalculateCycle({ flock_cycle_id, start_date, end_date }) {
 
 async function recalculateForReading({ coop_id, flock_cycle_id, recorded_at }) {
   if (!flock_cycle_id) return { skipped: true };
-  const cycle = await model.cycleById(flock_cycle_id);
+  const cycle = await model.cycleLocation(flock_cycle_id);
   if (!cycle || String(cycle.coop_id) !== String(coop_id))
     return { skipped: true };
-  const date = localDate(cycle.timezone, new Date(recorded_at));
-  if (
-    date < cycle.placement_date ||
-    (cycle.actual_harvest_date && date > cycle.actual_harvest_date)
-  )
-    return { skipped: true };
-  return recalculateCycle({ flock_cycle_id, start_date: date, end_date: date });
+  return recalculateCycle({ flock_cycle_id, recorded_at });
 }
 
 module.exports = {

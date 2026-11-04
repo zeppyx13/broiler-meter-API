@@ -47,7 +47,7 @@ async function farmContext(id, connection) {
 
 async function duplicate(meterId, value, date, source, connection) {
   const [rows] = await connection.query(
-    `SELECT id FROM meter_readings WHERE meter_id = ? AND recorded_at = ? AND reading_value = ?
+    `SELECT id, flock_cycle_id, recorded_at FROM meter_readings WHERE meter_id = ? AND recorded_at = ? AND reading_value = ?
      AND ((? = 'simulation' AND source = 'simulation') OR (? <> 'simulation' AND source <> 'simulation')) LIMIT 1 FOR UPDATE`,
     [meterId, date, value, source, source],
   );

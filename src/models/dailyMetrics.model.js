@@ -1,5 +1,13 @@
 const db = require("../config/db");
 
+async function cycleLocation(id, connection = db) {
+  const [rows] = await connection.query(
+    "SELECT coop_id FROM flock_cycles WHERE id = ?",
+    [id],
+  );
+  return rows[0] || null;
+}
+
 async function cycleById(id, connection = db) {
   const [rows] = await connection.query(
     `SELECT fc.*, DATE_FORMAT(fc.placement_date, '%Y-%m-%d') AS placement_date,
@@ -63,4 +71,4 @@ async function upsert(row, connection = db) {
   );
 }
 
-module.exports = { cycleById, dayReadings, populationChanges, upsert };
+module.exports = { cycleLocation, cycleById, dayReadings, populationChanges, upsert };
