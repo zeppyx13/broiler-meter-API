@@ -144,10 +144,16 @@ function createProvider({
           systemInstruction: SYSTEM,
           temperature: 0.2,
           candidateCount: 1,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 4096,
+          thinkingConfig: {
+            thinkingLevel: "low",
+          },
           responseMimeType: "text/plain",
           abortSignal: controller.signal,
-          httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } },
+          httpOptions: {
+            timeout: timeoutMs,
+            retryOptions: { attempts: 1 },
+          },
         },
       });
       const response = await Promise.race([
