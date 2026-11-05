@@ -22,7 +22,7 @@ const createSchema = z
   .object({
     coop_id: id,
     cycle_code: z.string().trim().min(1).max(60),
-    placement_date: date.default(new Date().toISOString().split("T")[0]),
+    placement_date: date.optional(),
     planned_harvest_date: date.nullable().optional(),
     initial_population: z.number().int().positive().max(4294967295),
     notes: z.string().trim().max(10000).nullable().optional(),
@@ -30,6 +30,7 @@ const createSchema = z
   .strict()
   .refine(
     (data) =>
+      !data.placement_date ||
       !data.planned_harvest_date ||
       data.planned_harvest_date >= data.placement_date,
     {

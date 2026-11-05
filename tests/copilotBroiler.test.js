@@ -88,7 +88,9 @@ test("Gemini uses env model, bounded tokens/deadline/no retries and no action to
   });
   assert.equal(result.state, "ready");
   assert.equal(request.model, "unit-model");
-  assert.equal(request.config.maxOutputTokens, 1024);
+  assert.equal(request.config.maxOutputTokens, 4096);
+  assert.equal(result.max_output_tokens, request.config.maxOutputTokens);
+  assert.equal(request.config.thinkingConfig, undefined);
   assert.equal(request.config.httpOptions.retryOptions.attempts, 1);
   assert.equal(request.config.abortSignal instanceof AbortSignal, true);
   assert.equal(request.config.tools, undefined);
@@ -105,6 +107,37 @@ test("Gemini uses env model, bounded tokens/deadline/no retries and no action to
     assert.equal(JSON.stringify(request.contents).includes(secret), false);
   assert.equal(result.text.includes("<script>"), false);
   assert.equal(result.text.includes("unit-only"), false);
+});
+
+test("Gemini uses model-compatible thinking options without forcing them onto other models", async () => {
+  for (const [model, expected] of [
+    ["gemini-3-flash-preview", { thinkingLevel: "LOW" }],
+    ["models/gemini-3.1-pro-preview", { thinkingLevel: "LOW" }],
+    ["gemini-2.5-pro", { thinkingBudget: 128 }],
+    ["gemini-2.5-flash", { thinkingBudget: 0 }],
+    ["gemini-2.5-flash-lite", { thinkingBudget: 0 }],
+    ["gemini-2.0-flash", undefined],
+    ["gemini-2.5-flash-image", undefined],
+    ["unit-model", undefined],
+  ]) {
+    let request;
+    const provider = adapter.createProvider({
+      env: () => ({ ...configured(), GEMINI_MODEL: model }),
+      createClient: () => ({
+        models: {
+          generateContent: async (input) => {
+            request = input;
+            return response();
+          },
+        },
+      }),
+    });
+    const result = await provider.generate({ context: {}, message: "Test" });
+    assert.equal(result.state, "ready", model);
+    assert.equal(request.model, model);
+    assert.deepEqual(request.config.thinkingConfig, expected, model);
+    assert.equal(result.max_output_tokens, 4096);
+  }
 });
 
 test("Gemini trims oldest history pairs so a long conversation still fits the outbound byte budget", async () => {
@@ -205,6 +238,11 @@ test("Gemini rejects function calls, blank/truncated/oversized responses and bou
     {
       candidates: [
         { finishReason: "MAX_TOKENS", content: { parts: [{ text: "cut" }] } },
+      ],
+    },
+    {
+      candidates: [
+        { finishReason: "SAFETY", content: { parts: [{ text: "blocked" }] } },
       ],
     },
     {

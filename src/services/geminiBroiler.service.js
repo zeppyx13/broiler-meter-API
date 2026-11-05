@@ -10,6 +10,19 @@ Return explanatory text only; no HTML, scripts, executable code or function call
 
 const MAX_OUTPUT_CHARS = 6000;
 const MAX_INPUT_BYTES = 24000;
+const MAX_OUTPUT_TOKENS = 4096;
+
+function thinkingConfig(model) {
+  const name = model.trim().replace(/^models\//, "");
+  if (/image/.test(name)) return undefined;
+  if (/^gemini-3(?:\.\d+)?-(?:pro|flash)(?:-|$)/.test(name))
+    return { thinkingLevel: "LOW" };
+  if (/^gemini-2\.5-pro(?:-|$)/.test(name))
+    return { thinkingBudget: 128 };
+  if (/^gemini-2\.5-flash(?:-|$)/.test(name))
+    return { thinkingBudget: 0 };
+  return undefined;
+}
 
 function cleanText(input, limit = MAX_OUTPUT_CHARS, env = process.env) {
   let text = String(input || "").replace(
@@ -137,6 +150,7 @@ function createProvider({
         client = factory({ apiKey: config.GEMINI_API_KEY });
         clientKey = config.GEMINI_API_KEY;
       }
+      const thinking = thinkingConfig(config.GEMINI_MODEL);
       const request = client.models.generateContent({
         model: config.GEMINI_MODEL,
         contents,
@@ -144,10 +158,8 @@ function createProvider({
           systemInstruction: SYSTEM,
           temperature: 0.2,
           candidateCount: 1,
-          maxOutputTokens: 4096,
-          thinkingConfig: {
-            thinkingLevel: "low",
-          },
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          ...(thinking ? { thinkingConfig: thinking } : {}),
           responseMimeType: "text/plain",
           abortSignal: controller.signal,
           httpOptions: {
@@ -202,7 +214,7 @@ function createProvider({
         state: "ready",
         text,
         provider: "gemini",
-        max_output_tokens: 1024,
+        max_output_tokens: MAX_OUTPUT_TOKENS,
       };
     } catch (error) {
       // SDK exceptions can contain credential-bearing URLs; never log or return them.

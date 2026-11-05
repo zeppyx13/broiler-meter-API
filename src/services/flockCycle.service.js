@@ -34,12 +34,16 @@ async function create(user, payload) {
       "operate",
       connection,
     );
-    if (payload.placement_date > localDate(coop.timezone))
+    const today = localDate(coop.timezone);
+    const data = { ...payload, placement_date: payload.placement_date ?? today };
+    if (data.placement_date > today)
       throw httpError(400, "Active cycle placement cannot be in the future");
-    checkPopulation(payload.initial_population, coop.capacity_birds);
+    if (data.planned_harvest_date && data.planned_harvest_date < data.placement_date)
+      throw httpError(400, "Planned harvest cannot precede placement");
+    checkPopulation(data.initial_population, coop.capacity_birds);
     if (await model.activeForUpdate(coop.id, connection))
       throw httpError(409, "Coop already has an active cycle");
-    const id = await model.create(payload, connection);
+    const id = await model.create(data, connection);
     return present(await model.findById(id, connection));
   });
 }

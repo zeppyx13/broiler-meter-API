@@ -1,5 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const crypto = require("node:crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -115,5 +116,19 @@ test("account validators prevent public role escalation and enforce database bou
   assert.equal(registerSchema.safeParse({ name: "Demo", email: "demo@example.test", password: "a".repeat(73) }).success, false);
   assert.equal(updateMeSchema.safeParse({ default_coop_id: -1 }).success, false);
   assert.equal(updateMeSchema.safeParse({ role: "admin" }).success, false);
-  assert.equal(updateMeSchema.safeParse({ default_coop_id: null, fcm_token: null }).success, true);
+  assert.equal(updateMeSchema.safeParse({ default_coop_id: null }).success, true);
+});
+
+test("profile validator rejects FCM fields in Broiler while preserving the legacy contract", () => {
+  const script = `
+    const { updateMeSchema } = require(process.argv[1]);
+    process.stdout.write(JSON.stringify(updateMeSchema.safeParse({ fcm_token: null }).success));
+  `;
+  for (const [databaseName, expected] of [["coasther_broiler", false], ["legacy_schema", true]]) {
+    const output = execFileSync(process.execPath, ["-e", script, require.resolve("../src/validators/user.validator")], {
+      env: { ...process.env, DB_NAME: databaseName },
+      encoding: "utf8",
+    });
+    assert.equal(JSON.parse(output), expected);
+  }
 });

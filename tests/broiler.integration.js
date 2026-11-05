@@ -74,46 +74,68 @@ test(
     }
 
     async function cleanup() {
-      // Delete only this run's synthetic fixtures. Never touch sensor or pre-existing business rows.
+      // Discover this run's descendant PKs without locks before starting deletion.
+      // Joined/range deletes can lock unrelated parents/index gaps during live ingest.
+      const [users] = emails.length
+        ? await db.query("SELECT id FROM users WHERE email IN (?)", [emails])
+        : [[]];
+      const ids = users.map((row) => row.id);
+      const [farms] = ids.length
+        ? await db.query(
+            "SELECT id FROM farms WHERE owner_user_id IN (?) AND name LIKE ?",
+            [ids, `${marker}%`],
+          )
+        : [[]];
+      const farmIds = farms.map((row) => row.id);
+      const [coops] = farmIds.length
+        ? await db.query("SELECT id FROM coops WHERE farm_id IN (?)", [farmIds])
+        : [[]];
+      const coopIds = coops.map((row) => row.id);
+      const [cycles] = coopIds.length
+        ? await db.query("SELECT id FROM flock_cycles WHERE coop_id IN (?)", [
+            coopIds,
+          ])
+        : [[]];
+      const cycleIds = cycles.map((row) => row.id);
+      const [events] = cycleIds.length
+        ? await db.query("SELECT id FROM flock_events WHERE flock_cycle_id IN (?)", [
+            cycleIds,
+          ])
+        : [[]];
+      const [members] = farmIds.length
+        ? await db.query("SELECT id FROM farm_members WHERE farm_id IN (?)", [farmIds])
+        : [[]];
       const connection = await db.getConnection();
       try {
         await connection.beginTransaction();
-        const [users] = emails.length
-          ? await connection.query("SELECT id FROM users WHERE email IN (?)", [
-              emails,
-            ])
-          : [[]];
-        const ids = users.map((row) => row.id);
         if (ids.length) {
-          const [farms] = await connection.query(
-            "SELECT id FROM farms WHERE owner_user_id IN (?) AND name LIKE ?",
-            [ids, `${marker}%`],
-          );
-          const farmIds = farms.map((row) => row.id);
           await connection.query(
             "UPDATE users SET default_coop_id = NULL WHERE id IN (?)",
             [ids],
           );
-          if (farmIds.length) {
+          if (events.length)
             await connection.query(
-              "DELETE e FROM flock_events e JOIN flock_cycles fc ON fc.id = e.flock_cycle_id JOIN coops c ON c.id = fc.coop_id WHERE c.farm_id IN (?)",
-              [farmIds],
+              "DELETE FROM flock_events WHERE id IN (?)",
+              [events.map((row) => row.id)],
             );
+          if (cycleIds.length)
             await connection.query(
-              "DELETE fc FROM flock_cycles fc JOIN coops c ON c.id = fc.coop_id WHERE c.farm_id IN (?)",
-              [farmIds],
+              "DELETE FROM flock_cycles WHERE id IN (?)",
+              [cycleIds],
             );
-            await connection.query("DELETE FROM coops WHERE farm_id IN (?)", [
-              farmIds,
+          if (coopIds.length)
+            await connection.query("DELETE FROM coops WHERE id IN (?)", [
+              coopIds,
             ]);
+          if (members.length)
             await connection.query(
-              "DELETE FROM farm_members WHERE farm_id IN (?)",
-              [farmIds],
+              "DELETE FROM farm_members WHERE id IN (?)",
+              [members.map((row) => row.id)],
             );
+          if (farmIds.length)
             await connection.query("DELETE FROM farms WHERE id IN (?)", [
               farmIds,
             ]);
-          }
           await connection.query("DELETE FROM users WHERE id IN (?)", [ids]);
         }
         await connection.commit();

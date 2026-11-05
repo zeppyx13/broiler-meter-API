@@ -77,3 +77,61 @@ test("population bounds are checked before inserting an event", async (t) => {
   await assert.rejects(service.recordEvent({ id: 1 }, 2, { event_type: "adjustment", population_change: 100 }), { statusCode: 409 });
   assert.equal(insert.mock.callCount(), 0);
 });
+
+test("omitted placement follows each request across farm-local midnight", async (t) => {
+  transactionMock(t);
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-02T15:59:00Z") });
+  t.mock.method(model, "activeForUpdate", async () => null);
+  let stored;
+  t.mock.method(model, "create", async (payload) => {
+    stored = { id: 2, ...payload, status: "active", timezone: "Asia/Makassar" };
+    return 2;
+  });
+  t.mock.method(model, "findById", async () => stored);
+  const input = { coop_id: 1, cycle_code: "C1", initial_population: 10 };
+  const beforeMidnight = await service.create({ id: 1 }, validator.createSchema.parse(input));
+  assert.equal(beforeMidnight.placement_date, "2026-11-02");
+  assert.equal(beforeMidnight.day_age, 1);
+  t.mock.timers.setTime(Date.parse("2026-11-02T16:01:00Z"));
+  const afterMidnight = await service.create({ id: 1 }, validator.createSchema.parse(input));
+  assert.equal(afterMidnight.placement_date, "2026-11-03");
+  assert.equal(afterMidnight.day_age, 1);
+  assert.equal(input.placement_date, undefined);
+});
+
+test("placement defaults use the authorized farm timezone while explicit dates remain intact", async (t) => {
+  transactionMock(t);
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-02T16:30:00Z") });
+  t.mock.method(model, "activeForUpdate", async () => null);
+  let stored;
+  let timezone;
+  t.mock.method(access, "requireCoop", async () => ({ id: 1, timezone, capacity_birds: 100 }));
+  t.mock.method(model, "create", async (payload) => {
+    stored = { id: 2, ...payload, status: "active", timezone };
+    return 2;
+  });
+  t.mock.method(model, "findById", async () => stored);
+  for (const [zone, expected] of [["Asia/Makassar", "2026-11-03"], ["America/Los_Angeles", "2026-11-02"]]) {
+    timezone = zone;
+    const result = await service.create({ id: 1 }, validator.createSchema.parse({
+      coop_id: 1, cycle_code: "C1", initial_population: 10, planned_harvest_date: "2026-11-30",
+    }));
+    assert.equal(result.placement_date, expected);
+  }
+  const explicit = await service.create({ id: 1 }, validator.createSchema.parse({
+    coop_id: 1, cycle_code: "C1", initial_population: 10, placement_date: "2026-11-01",
+  }));
+  assert.equal(explicit.placement_date, "2026-11-01");
+});
+
+test("planned harvest before an omitted farm-local placement is rejected before insertion", async (t) => {
+  const { calls } = transactionMock(t);
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-02T16:30:00Z") });
+  const insert = t.mock.method(model, "create", async () => assert.fail("Invalid harvest must not be saved"));
+  const payload = validator.createSchema.parse({
+    coop_id: 1, cycle_code: "C1", initial_population: 10, planned_harvest_date: "2026-11-02",
+  });
+  await assert.rejects(service.create({ id: 1 }, payload), { statusCode: 400, message: "Planned harvest cannot precede placement" });
+  assert.equal(insert.mock.callCount(), 0);
+  assert.deepEqual(calls, ["begin", "coop_lock", "rollback", "release"]);
+});
