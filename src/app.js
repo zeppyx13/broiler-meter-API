@@ -43,7 +43,7 @@ const {
 app.use(generalLimiter);
 // Specific limiters
 app.use("/api/auth", authLimiter);
-app.use("/api/ai", aiLimiter);
+app.use(isBroiler ? "/api/ai/copilot" : "/api/ai", aiLimiter);
 app.use("/api/scheduler", schedulerLimiter);
 app.use("/api/upload", uploadLimiter);
 // Serve static files from /public
@@ -77,6 +77,9 @@ if (isBroiler) {
   app.use("/api/guard", guardRoutes.statusRouter);
   app.use("/api/notifications", require("./routes/notificationBroiler.routes"));
   app.use("/api/relays", require("./routes/relayBroiler.routes"));
+  app.use("/api/forecasts", require("./routes/forecast.routes"));
+  app.use("/api/eco-recommendations", require("./routes/ecoAdvisor.routes"));
+  app.use("/api/ai", require("./routes/copilotBroiler.routes"));
 } else {
   // Retain legacy routes without loading their MQTT/payment/AI dependencies in broiler mode.
   app.use("/api/rooms", require("./routes/room.routes"));
