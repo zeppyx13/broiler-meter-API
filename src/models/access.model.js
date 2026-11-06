@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const scope = require("../utils/coopScope");
 
 async function farmForUser(userId, farmId, connection = db) {
   const [rows] = await connection.query(
@@ -11,12 +12,16 @@ async function farmForUser(userId, farmId, connection = db) {
 }
 
 async function coopForUser(userId, coopId, connection = db) {
+  // Pool reads run in autocommit. A joined shared lock can take coop before farm,
+  // deadlocking a writer that already holds the canonical farm -> coop locks.
+  // Transaction callers hold those parent locks before this current authorization read.
+  const lock = connection === db ? "" : " LOCK IN SHARE MODE";
   const [rows] = await connection.query(
     `SELECT c.*, f.timezone, f.name AS farm_name, f.is_active AS farm_is_active,
             f.owner_user_id, m.role AS member_role
      FROM coops c JOIN farms f ON f.id = c.farm_id
      LEFT JOIN farm_members m ON m.farm_id = f.id AND m.user_id = ?
-     WHERE c.id = ? LOCK IN SHARE MODE`,
+     WHERE c.id = ?${lock}`,
     [userId, coopId],
   );
   return rows[0] || null;
@@ -54,6 +59,7 @@ async function lockUser(userId, connection) {
 }
 
 async function findDefaultCoop(user, connection = db) {
+  const scoped = await scope.predicate(connection,"c.id","m.user_id","m.role");
   const [rows] = await connection.query(
     `SELECT c.*, f.timezone, f.name AS farm_name, f.is_active AS farm_is_active,
             f.owner_user_id, m.role AS member_role
@@ -61,20 +67,21 @@ async function findDefaultCoop(user, connection = db) {
      JOIN farms f ON f.id = c.farm_id
      LEFT JOIN farm_members m ON m.farm_id = f.id AND m.user_id = u.id
      WHERE u.id = ? AND c.status = 'active' AND f.is_active = 1
-       AND (? = 'admin' OR m.user_id IS NOT NULL)`,
+       AND (? = 'admin' OR (m.user_id IS NOT NULL AND ${scoped}))`,
     [user.id, user.role],
   );
   return rows[0] || null;
 }
 
 async function firstAccessibleCoop(user, connection = db) {
+  const scoped = await scope.predicate(connection,"c.id","m.user_id","m.role");
   const [rows] = await connection.query(
     `SELECT c.*, f.timezone, f.name AS farm_name, f.is_active AS farm_is_active,
             f.owner_user_id, m.role AS member_role
      FROM coops c JOIN farms f ON f.id = c.farm_id
      LEFT JOIN farm_members m ON m.farm_id = f.id AND m.user_id = ?
      WHERE c.status = 'active' AND f.is_active = 1
-       AND (? = 'admin' OR m.user_id IS NOT NULL)
+       AND (? = 'admin' OR (m.user_id IS NOT NULL AND ${scoped}))
      ORDER BY c.id LIMIT 1`,
     [user.id, user.role],
   );

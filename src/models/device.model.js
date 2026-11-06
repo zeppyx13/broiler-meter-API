@@ -1,15 +1,17 @@
 const db = require("../config/db");
+const scope = require("../utils/coopScope");
 
 async function list(
   user,
   { coop_id = null, is_active = null, page, limit },
   connection = db,
 ) {
+  const scoped = await scope.predicate(connection);
   const [rows] = await connection.query(
     `SELECT d.*, c.name AS coop_name, f.timezone
      FROM devices d JOIN coops c ON c.id = d.coop_id JOIN farms f ON f.id = c.farm_id
      LEFT JOIN farm_members m ON m.farm_id = f.id AND m.user_id = ?
-     WHERE (? = 'admin' OR m.user_id IS NOT NULL)
+     WHERE (? = 'admin' OR (m.user_id IS NOT NULL AND ${scoped}))
        AND (? IS NULL OR d.coop_id = ?) AND (? IS NULL OR d.is_active = ?)
      ORDER BY d.id LIMIT ? OFFSET ?`,
     [

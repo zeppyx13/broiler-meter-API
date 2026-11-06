@@ -210,7 +210,7 @@ async function sendCommand(user, id, payload) {
   const now = new Date();
   const reservation = await withTransaction(async (connection) => {
     const { relay, device, coop_id } = await lockRelay(id, connection, routing);
-    const coop = await access.requireCoop(user, coop_id, "manage", connection);
+    const coop = await access.requireCoop(user, coop_id, "relay:operate", connection);
     ensureDevice(device);
     if (
       !relay.is_enabled ||
@@ -283,7 +283,7 @@ async function sendCommand(user, id, payload) {
       const coop = await access.requireCoop(
         user,
         coop_id,
-        "manage",
+        "relay:operate",
         connection,
       );
       const queued = await model.lockCommand(

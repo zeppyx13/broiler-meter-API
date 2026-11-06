@@ -1,119 +1,24 @@
-const fs = require("fs");
-const path = require("path");
-const model = require("../models/schemaCompatibility.model");
-
-const normalizeType = (type) =>
-  type.toLowerCase().replace(/\b(tinyint|smallint|int|bigint)\(\d+\)/g, "$1");
-const normalizeDefault = (value) => {
-  if (value == null || value === "NULL") return null;
-  return String(value)
-    .replace(/^'(.*)'$/, "$1")
-    .toLowerCase()
-    .replace(/\(\)$/, "");
-};
+const fs=require("node:fs");
+const path=require("node:path");
+const model=require("../models/schemaCompatibility.model");
+const definitions=require("../utils/schemaDefinition");
 
 async function verify(connection) {
-  const schema = fs.readFileSync(
-    path.join(__dirname, "../../COASTHER_BROILER_SCHEMA_V1.sql"),
-    "utf8",
-  );
-  const actual = await model.metadata(connection);
-  const differences = [];
-  if (actual.selected.database_name !== "coasther_broiler") {
-    throw new Error(
-      "DB_NAME must select coasther_broiler; no schema was modified",
-    );
+  const schema=fs.readFileSync(path.join(__dirname,"../../COASTHER_BROILER_SCHEMA_V1.sql"),"utf8");
+  const actual=await model.metadata(connection);
+  const database=actual.selected.database_name;
+  if(database!=="coasther_broiler" && !(process.env.NODE_ENV==="test" && database===process.env.BROILER_TEST_DATABASE && /^coasther_broiler_test_[a-z0-9_]+$/.test(database)))throw new Error("DB_NAME must select coasther_broiler; no schema was modified");
+  const core=definitions.parseTables(schema);
+  const differences=[...definitions.compareTables(core,actual),...definitions.compareForeignKeys(definitions.parseForeignKeys(schema),actual)];
+  const directory=path.join(__dirname,"../../migrations");
+  const extensionSql=fs.existsSync(directory)?fs.readdirSync(directory).filter((file)=>/^00[56].*\.sql$/.test(file)).sort().map((file)=>fs.readFileSync(path.join(directory,file),"utf8")).join("\n"):"";
+  const extensions=definitions.parseTables(extensionSql);
+  const installed=extensions.filter((table)=>actual.tables.some((row)=>row.TABLE_NAME===table.name));
+  if(installed.length && installed.length!==extensions.length)differences.push("Phase 5 migration is incomplete; apply the full reviewed migration set before enabling extension features");
+  if(installed.length===extensions.length && installed.length){
+    differences.push(...definitions.compareTables(extensions,actual),...definitions.compareForeignKeys(definitions.parseForeignKeys(extensionSql),actual));
   }
-  const expectedTables = [
-    ...schema.matchAll(/CREATE TABLE `([^`]+)` \(([\s\S]*?)\) ENGINE/g),
-  ];
-  let columnCount = 0;
-  for (const [, table, body] of expectedTables) {
-    if (
-      actual.tables.find((item) => item.TABLE_NAME === table)?.ENGINE !==
-      "InnoDB"
-    ) {
-      differences.push(`${table}: missing table or non-InnoDB engine`);
-    }
-    for (const [, name, definition] of body.matchAll(
-      /^  `([^`]+)` ([^\r\n]+)/gm,
-    )) {
-      columnCount++;
-      const column = actual.columns.find(
-        (item) => item.TABLE_NAME === table && item.COLUMN_NAME === name,
-      );
-      const type = definition.match(/^(\w+(?:\([^)]*\))?(?: UNSIGNED)?)/i)[1];
-      const defaultValue =
-        definition.match(/\bDEFAULT ('[^']*'|[^\s,]+)/i)?.[1] ?? null;
-      if (
-        !column ||
-        normalizeType(column.COLUMN_TYPE) !== normalizeType(type) ||
-        column.IS_NULLABLE !==
-          (definition.includes("NOT NULL") ? "NO" : "YES") ||
-        normalizeDefault(column.COLUMN_DEFAULT) !==
-          normalizeDefault(defaultValue) ||
-        /AUTO_INCREMENT/i.test(column.EXTRA) !==
-          /AUTO_INCREMENT/i.test(definition)
-      ) {
-        differences.push(
-          `${table}.${name}: missing or incompatible column definition`,
-        );
-      }
-    }
-    for (const [, kind, named, fields] of body.matchAll(
-      /(?:^|\n)  (PRIMARY KEY|UNIQUE KEY|KEY)(?: `([^`]+)`)? \(([^)]+)\)/g,
-    )) {
-      const name = kind === "PRIMARY KEY" ? "PRIMARY" : named;
-      const index = actual.indexes.filter(
-        (item) => item.TABLE_NAME === table && item.INDEX_NAME === name,
-      );
-      const names = [...fields.matchAll(/`([^`]+)`/g)].map((item) => item[1]);
-      if (
-        index.map((item) => item.COLUMN_NAME).join(",") !== names.join(",") ||
-        Boolean(index[0]?.NON_UNIQUE) !== (kind === "KEY")
-      ) {
-        differences.push(`${table}.${name}: missing or incompatible index`);
-      }
-    }
-  }
-  // Includes the ALTER TABLE users/default_coop_id foreign key as well.
-  for (const [
-    ,
-    name,
-    column,
-    target,
-    targetColumn,
-    update,
-    deletion,
-  ] of schema.matchAll(
-    /CONSTRAINT `([^`]+)` FOREIGN KEY \(`([^`]+)`\) REFERENCES `([^`]+)` \(`([^`]+)`\)\s+ON UPDATE (CASCADE|RESTRICT|SET NULL) ON DELETE (CASCADE|RESTRICT|SET NULL)/g,
-  )) {
-    const key = actual.foreignKeys.find(
-      (item) => item.CONSTRAINT_NAME === name,
-    );
-    if (
-      !key ||
-      key.COLUMN_NAME !== column ||
-      key.REFERENCED_TABLE_NAME !== target ||
-      key.REFERENCED_COLUMN_NAME !== targetColumn ||
-      key.UPDATE_RULE !== update ||
-      key.DELETE_RULE !== deletion
-    ) {
-      differences.push(`${name}: missing or incompatible foreign key`);
-    }
-  }
-  if (differences.length) {
-    throw new Error(
-      `Imported schema differs from approved SQL: ${differences.join("; ")}. No schema was modified.`,
-    );
-  }
-  return {
-    database: actual.selected.database_name,
-    version: actual.selected.version,
-    verified_tables: expectedTables.length,
-    verified_columns: columnCount,
-    differences,
-  };
+  if(differences.length)throw new Error("Imported schema differs from approved SQL: "+differences.join("; ")+". No schema was modified.");
+  return {database,version:actual.selected.version,verified_tables:core.length,verified_columns:core.reduce((sum,table)=>sum+table.columns.length,0),differences,phase5:{state:installed.length?"migrated":"migration_required",verified_tables:installed.length,expected_tables:extensions.length,verified_columns:installed.reduce((sum,table)=>sum+table.columns.length,0),verified_indexes:installed.reduce((sum,table)=>sum+table.indexes.length,0),verified_foreign_keys:installed.length===extensions.length?definitions.parseForeignKeys(extensionSql).length:0}};
 }
-
-module.exports = { verify };
+module.exports={verify};

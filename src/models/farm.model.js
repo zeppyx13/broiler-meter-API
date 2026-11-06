@@ -26,6 +26,10 @@ async function create(userId, data, connection) {
   );
   return result.insertId;
 }
+async function ownsAnyFarm(userId,connection=db) {
+  const [[row]]=await connection.query("SELECT id FROM farms WHERE owner_user_id=? LIMIT 1",[userId]);
+  return Boolean(row);
+}
 
 async function update(farmId, data, connection) {
   await connection.query(
@@ -117,6 +121,7 @@ async function clearMemberDefault(farmId, userId, connection) {
 module.exports = {
   list,
   create,
+  ownsAnyFarm,
   update,
   lockCoops,
   hasActiveCycles,

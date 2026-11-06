@@ -89,7 +89,7 @@ async function createForAlert(connection, alert, coop) {
     16000,
   );
   const created = [];
-  for (const recipient of await model.recipients(coop.farm_id, connection)) {
+  for (const recipient of await model.recipients(coop.farm_id, connection, coop.id)) {
     const channels = [
       "in_app",
       ...(["warning", "critical"].includes(stored.severity) ? ["email"] : []),

@@ -1,17 +1,18 @@
-const admin = require("firebase-admin");
+const { getApps, initializeApp, cert } = require("firebase-admin/app");
+const { getMessaging } = require("firebase-admin/messaging");
 const logger = require("../config/logger");
 
-if (!admin.apps.length) {
+if (!getApps().length) {
   const serviceAccount = require(`../../${process.env.FCM_ADMIN_SDK}`);
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+  initializeApp({
+    credential: cert(serviceAccount),
   });
 }
 
 async function sendNotification({ fcm_token, title, body, data = {} }) {
   if (!fcm_token) return;
   try {
-    await admin.messaging().send({
+    await getMessaging().send({
       token: fcm_token,
       notification: { title, body },
       data,

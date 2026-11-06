@@ -1,4 +1,5 @@
 const { staleSeconds } = require("../utils/deviceStatus");
+const { localDate } = require("../utils/farmDate");
 
 function createEngine({ maxKeys = 512, maxSamples = 4096 } = {}) {
   const history = new Map();
@@ -82,12 +83,30 @@ function createEngine({ maxKeys = 512, maxSamples = 4096 } = {}) {
   }
   function evaluateRule(
     rule,
-    { coopId, snapshot, devices, now = new Date(), source = "rule" },
+    { coopId, snapshot, devices, now = new Date(), source = "rule", production, timezone = "Asia/Makassar" },
   ) {
     const clock = now.getTime();
     const p = rule.parameters_json;
     if (!rule.is_active)
       return [result(rule, null, "not_evaluated", "rule_disabled")];
+    if (["daily_record_missing", "cycle_overdue"].includes(rule.rule_code)) {
+      if (!production) return [result(rule, null, "insufficient_data", "production_context_unavailable")];
+      const date = localDate(timezone, now);
+      if (!production.cycle) return [result(rule, null, "recovery", "no_active_cycle", { local_date: date })];
+      const evidence = { local_date: date, timezone, cycle_id: production.cycle.id, interpretation: "Production record reminder; no physical fault is inferred" };
+      if (rule.rule_code === "cycle_overdue") {
+        const target = production.cycle.planned_harvest_date;
+        if (!target || !/^\d{4}-\d{2}-\d{2}$/.test(target)) return [result(rule, null, "insufficient_data", "planned_harvest_date_missing", evidence)];
+        const days = Math.floor((Date.parse(date) - Date.parse(target)) / 86400000);
+        return [result(rule, null, days > p.grace_days ? "trigger" : "recovery", days > p.grace_days ? "planned_harvest_date_passed" : "within_harvest_target", { ...evidence, planned_harvest_date: target, overdue_days: Math.max(0, days), grace_days: p.grace_days })];
+      }
+      if (!production.daily_records_available) return [result(rule, null, "insufficient_data", "daily_records_migration_required", evidence)];
+      const parts = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(now);
+      const part = (key) => Number(parts.find((item) => item.type === key).value);
+      const elapsed = (part("hour") - p.due_hour) * 3600 + part("minute") * 60 + part("second");
+      const status = production.recorded_today ? "recovery" : elapsed >= rule.evaluation_window_sec ? "trigger" : "normal";
+      return [result(rule, null, status, production.recorded_today ? "daily_record_present" : elapsed >= rule.evaluation_window_sec ? "daily_record_due" : "daily_record_deadline_pending", { ...evidence, due_hour: p.due_hour, recorded_today: production.recorded_today, evaluation_window_sec: rule.evaluation_window_sec })];
+    }
     if (rule.rule_code === "device_offline") {
       const subjects = devices.filter(
         (device) =>
@@ -199,7 +218,8 @@ function createEngine({ maxKeys = 512, maxSamples = 4096 } = {}) {
     const field =
       rule.rule_code === "suspected_power_anomaly"
         ? "power_w"
-        : "flow_rate_lpm";
+        : rule.rule_code === "voltage_abnormal" ? "voltage_v"
+          : rule.rule_code === "low_power_factor" ? "power_factor" : "flow_rate_lpm";
     const measurement = sample(
       snapshot,
       field,
@@ -227,6 +247,11 @@ function createEngine({ maxKeys = 512, maxSamples = 4096 } = {}) {
         measurement.reason = "invalid_or_unsupported_panel_measurement";
       }
     }
+    if (!measurement.reason && field === "voltage_v" && measurement.value <= 0) measurement.reason = "invalid_or_unsupported_voltage_measurement";
+    if (!measurement.reason && field === "power_factor") {
+      const power = sample(snapshot, "power_w", devices, source, clock, p.max_sample_gap_sec);
+      if (measurement.value <= 0 || power.reason || power.value < p.min_power_w || String(power.device_id) !== String(measurement.device_id) || Math.abs(power.at - measurement.at) > p.max_sample_gap_sec * 1000) measurement.reason = "power_factor_requires_valid_panel_load";
+    }
     const key = `${coopId}:${rule.id}:${measurement.device_id || "unknown"}:${field}:${source}`;
     const points = observe(
       key,
@@ -243,12 +268,14 @@ function createEngine({ maxKeys = 512, maxSamples = 4096 } = {}) {
         : null,
       window_seconds: rule.evaluation_window_sec,
       recovery_window_sec: p.recovery_window_sec,
-      threshold: field === "power_w" ? p.min_power_w : p.max_flow_lpm,
+      threshold: field === "power_w" ? p.min_power_w : field === "voltage_v" ? { min: p.min_voltage_v, max: p.max_voltage_v } : field === "power_factor" ? p.min_power_factor : p.max_flow_lpm,
       recovery_threshold:
-        field === "power_w" ? p.recovery_power_w : p.recovery_flow_lpm,
+        field === "power_w" ? p.recovery_power_w : field === "voltage_v" ? { min: p.recovery_min_voltage_v, max: p.recovery_max_voltage_v } : field === "power_factor" ? p.recovery_power_factor : p.recovery_flow_lpm,
       interpretation:
         field === "power_w"
           ? "Suspected aggregate load anomaly, not confirmation of an individual fan failure"
+          : field === "voltage_v" ? "Sustained panel voltage anomaly; an individual appliance fault is not established"
+            : field === "power_factor" ? "Low power factor with valid panel load; advisory inspection only"
           : rule.rule_code === "no_water_flow"
             ? "Expected tank-inlet flow absent; drinking intake is not measured"
             : "Sustained high tank-inlet flow; leakage is not confirmed",
@@ -284,12 +311,16 @@ function createEngine({ maxKeys = 512, maxSamples = 4096 } = {}) {
     const breach = (point) =>
       field === "power_w"
         ? point.value < p.min_power_w
+        : field === "voltage_v" ? point.value < p.min_voltage_v || point.value > p.max_voltage_v
+          : field === "power_factor" ? point.value < p.min_power_factor
         : rule.rule_code === "no_water_flow"
           ? point.value <= p.max_flow_lpm
           : point.value > p.max_flow_lpm;
     const healthy = (point) =>
       field === "power_w"
         ? point.value >= p.recovery_power_w
+        : field === "voltage_v" ? point.value >= p.recovery_min_voltage_v && point.value <= p.recovery_max_voltage_v
+          : field === "power_factor" ? point.value >= p.recovery_power_factor
         : rule.rule_code === "no_water_flow"
           ? point.value >= p.recovery_flow_lpm
           : point.value <= p.recovery_flow_lpm;

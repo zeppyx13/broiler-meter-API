@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const scope = require("../utils/coopScope");
 
 async function candidates(limit) {
   const [rows] = await db.query(
@@ -10,9 +11,10 @@ async function candidates(limit) {
 }
 
 async function lockContext(id, connection) {
+  const scoped = await scope.predicate(connection);
   const [rows] = await connection.query(
     `SELECT n.*, a.coop_id, a.source, a.severity, a.alert_type, a.detected_at, a.status AS alert_status,
-       c.name AS coop_name, c.farm_id, f.timezone, u.email, m.role AS recipient_role
+       c.name AS coop_name, c.farm_id, f.timezone, u.email, CASE WHEN ${scoped} THEN m.role ELSE NULL END AS recipient_role
      FROM notifications n JOIN alerts a ON a.id = n.alert_id JOIN coops c ON c.id = a.coop_id
      JOIN farms f ON f.id = c.farm_id JOIN users u ON u.id = n.user_id
      LEFT JOIN farm_members m ON m.farm_id = c.farm_id AND m.user_id = n.user_id

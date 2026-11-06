@@ -14,7 +14,9 @@ async function findById(id, connection = db) {
 
 async function lockById(id, connection) {
   const [rows] = await connection.query(
-    `SELECT *, DATE_FORMAT(placement_date, '%Y-%m-%d') AS placement_date
+    `SELECT *, DATE_FORMAT(placement_date, '%Y-%m-%d') AS placement_date,
+       DATE_FORMAT(planned_harvest_date, '%Y-%m-%d') AS planned_harvest_date,
+       DATE_FORMAT(actual_harvest_date, '%Y-%m-%d') AS actual_harvest_date
      FROM flock_cycles WHERE id = ? FOR UPDATE`,
     [id],
   );

@@ -81,7 +81,8 @@ function errorHandler(err, req, res, next) {
 
   return res.status(statusCode).json({
     success: false,
-    message: statusCode >= 500 ? "Internal server error" : message,
+    message: err.code === "migration_required" ? "Phase 5 database migration is required; ask the operator to apply the reviewed migration after backup" : statusCode >= 500 ? "Internal server error" : message,
+    ...(err.code === "migration_required" ? { code: "migration_required" } : {}),
     ...(errors ? { errors } : {}),
   });
 }

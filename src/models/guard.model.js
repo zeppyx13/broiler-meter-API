@@ -93,6 +93,20 @@ async function activeCycle(coopId, connection) {
   );
   return row?.id || null;
 }
+async function productionContext(coopId, date, connection) {
+  const [[cycle]] = await connection.query(
+    "SELECT id,DATE_FORMAT(placement_date,'%Y-%m-%d') AS placement_date,DATE_FORMAT(planned_harvest_date,'%Y-%m-%d') AS planned_harvest_date FROM flock_cycles WHERE coop_id=? AND status='active' ORDER BY id LIMIT 1",
+    [coopId],
+  );
+  if (!cycle) return { cycle: null, daily_records_available: true, recorded_today: false };
+  try {
+    const [[record]] = await connection.query("SELECT id FROM flock_daily_records WHERE flock_cycle_id=? AND record_date=? AND is_void=0 LIMIT 1", [cycle.id, date]);
+    return { cycle, daily_records_available: true, recorded_today: Boolean(record) };
+  } catch (error) {
+    if (error.code === "ER_NO_SUCH_TABLE") return { cycle, daily_records_available: false, recorded_today: null };
+    throw error;
+  }
+}
 async function latestEpisode(key, connection) {
   const [[row]] = await connection.query(
     "SELECT * FROM alerts WHERE dedupe_key = ? ORDER BY id DESC LIMIT 1",
@@ -192,6 +206,7 @@ module.exports = {
   devices,
   snapshot,
   activeCycle,
+  productionContext,
   latestEpisode,
   createAlert,
   alert,

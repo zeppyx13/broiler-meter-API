@@ -9,6 +9,7 @@ const metricsRefresh = require("./mqttMetricsRefresh.service");
 const phase3 = require("./broilerPhase3Runtime.service");
 const inputHealth = require("../utils/iotInputHealth");
 const { staleSeconds } = require("../utils/deviceStatus");
+const monitoringHistory = require("./phase5Monitoring.service");
 
 const measurementFields = {
   flow_rate_lpm: "flow_rate_lpm",
@@ -225,6 +226,7 @@ async function ingestTelemetry(
   payload,
   { source, receivedAt, io, heartbeat, context },
 ) {
+  let historyCaptured = false;
   context.stage = "mapping";
   const mapping = await model.deviceByTopic(key);
   if (!mapping) return { outcome: "unmapped" };
@@ -237,6 +239,11 @@ async function ingestTelemetry(
     if (!device.is_active || coop.status !== "active" || !farm.is_active) {
       return { outcome: "disabled" };
     }
+    // The bounded instantaneous series is independent from the latest-snapshot cursor.
+    // Old-but-valid samples may fill history, without overwriting live data or heartbeat.
+    const historyResult = await monitoringHistory.capture(connection, device, payload, source, receivedAt);
+    historyCaptured = historyResult.state === "stored";
+    await monitoringHistory.captureDiagnostic(connection, device, "TELEMETRY_RECEIVED", source, receivedAt);
     context.stage = "heartbeat";
     const lastSeen =
       source !== "simulation" && heartbeat
@@ -279,6 +286,7 @@ async function ingestTelemetry(
       last_seen_at: lastSeen,
     };
   });
+  if (historyCaptured) await monitoringHistory.pruneIfDue(receivedAt);
   void phase3.enqueue(result, payload, { io, source, receivedAt });
   if (result.outcome === "stored") {
     context.persisted = true;

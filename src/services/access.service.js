@@ -1,6 +1,8 @@
 const db = require("../config/db");
 const model = require("../models/access.model");
 const httpError = require("../utils/httpError");
+const schema = require("../utils/phase5Schema");
+const domain = require("../models/phase5Domain.model");
 
 function authorize(user, resource, capability) {
   if (!resource) throw httpError(404, "Resource not found");
@@ -26,9 +28,24 @@ async function requireFarm(user, farmId, capability = "read", connection = db) {
 
 async function requireCoop(user, coopId, capability = "read", connection = db) {
   const coop = await model.coopForUser(user.id, coopId, connection);
-  authorize(user, coop, capability);
+  const relay = capability === "relay:operate";
+  authorize(user, coop, relay ? "read" : capability);
+  if (user.role !== "admin" && coop.member_role === "operator") {
+    const migrated = await schema.tableAvailable(connection, "coop_members");
+    if (migrated) {
+      const assignment = await domain.assignment(coopId,user.id,connection);
+      if (!assignment || (capability === "operate" && !assignment.can_operate) ||
+          (relay && (!assignment.can_operate || !assignment.relay_operate))) {
+        throw httpError(403, "Coop assignment or capability denied");
+      }
+    } else if (relay) {
+      throw httpError(403, "Relay operation requires an explicit coop capability");
+    }
+  } else if (relay) {
+    authorize(user,coop,"manage");
+  }
   if (
-    capability === "operate" &&
+    ["operate", "relay:operate"].includes(capability) &&
     (!coop.farm_is_active || coop.status !== "active")
   ) {
     throw httpError(409, "Coop or farm is inactive");

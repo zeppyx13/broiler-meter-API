@@ -6,6 +6,7 @@ const httpError = require("../utils/httpError");
 const validator = require("../validators/guard.validator");
 const { createEngine } = require("./guardEngine.service");
 const diagnostics = require("../utils/mqttDiagnostics");
+const { localDate } = require("../utils/farmDate");
 
 const engine = createEngine();
 const evaluations = new Map();
@@ -241,6 +242,10 @@ async function resolve(user, id, note, { io, now = new Date() } = {}) {
 }
 
 const messages = {
+  voltage_abnormal: ["Dugaan tegangan panel tidak normal", "Tegangan panel berada di luar rentang yang dikonfigurasi secara berkelanjutan. Pemeriksaan instrumen dan panel diperlukan; ini bukan konfirmasi kerusakan alat individual."],
+  low_power_factor: ["Power factor panel rendah", "Power factor rendah teramati saat ada beban panel yang valid. Periksa konfigurasi dan karakteristik beban; rekomendasi ini tidak mengendalikan peralatan."],
+  daily_record_missing: ["Catatan harian belum tercatat", "Batas waktu catatan harian kalender kandang sudah lewat. Periksa dan catat deplesi, pakan, serta sampel bobot bila tersedia."],
+  cycle_overdue: ["Siklus melewati target panen", "Tanggal target panen yang tersimpan sudah lewat. Konfirmasi status produksi dan perbarui workflow panen secara manual."],
   device_offline: [
     "Monitoring perangkat tidak tersedia",
     "Perangkat tidak mengirim receipt valid dalam jendela yang dikonfigurasi. Ini bukan konfirmasi padam listrik atau kerusakan kipas.",
@@ -289,6 +294,9 @@ async function evaluateCoop(
     }));
     const snapshot = await model.snapshot(coopId, connection);
     const cycleId = await model.activeCycle(coopId, connection);
+    const production = rules.some((rule) => ["daily_record_missing", "cycle_overdue"].includes(rule.rule_code))
+      ? await model.productionContext(coopId, localDate(coop.timezone, now), connection)
+      : null;
     const changes = [];
     const results = [];
     for (const row of rules) {
@@ -309,15 +317,17 @@ async function evaluateCoop(
         snapshot,
         now,
         source,
+        production,
+        timezone: coop.timezone,
       });
       results.push(...subjects);
       for (const decision of subjects) {
         if (
-          !decision.device_id ||
+          (!decision.device_id && !["daily_record_missing", "cycle_overdue"].includes(rule.rule_code)) ||
           !["trigger", "recovery"].includes(decision.status)
         )
           continue;
-        const key = `guard:${coopId}:${rule.id}:${decision.device_id}:${source}`;
+        const key = `guard:${coopId}:${rule.id}:${decision.device_id || "coop"}:${source}`;
         const prior = await model.latestEpisode(key, connection);
         const unresolved = prior && prior.status !== "resolved";
         const evidence = {

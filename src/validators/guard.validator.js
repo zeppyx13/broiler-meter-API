@@ -6,6 +6,10 @@ const ruleCode = z.enum([
   "suspected_power_anomaly",
   "suspected_water_anomaly",
   "no_water_flow",
+  "voltage_abnormal",
+  "low_power_factor",
+  "daily_record_missing",
+  "cycle_overdue",
 ]);
 const severity = z.enum(["info", "warning", "critical"]);
 const common = {
@@ -14,6 +18,21 @@ const common = {
   min_samples: z.number().int().min(2).max(360).default(3),
 };
 const parameters = {
+  voltage_abnormal: z.object({
+    ...common,
+    min_voltage_v: z.number().positive().max(1000).default(198),
+    max_voltage_v: z.number().positive().max(1000).default(242),
+    recovery_min_voltage_v: z.number().positive().max(1000).default(205),
+    recovery_max_voltage_v: z.number().positive().max(1000).default(235),
+  }).strict().refine((p) => p.min_voltage_v < p.recovery_min_voltage_v && p.recovery_min_voltage_v < p.recovery_max_voltage_v && p.recovery_max_voltage_v < p.max_voltage_v, "Recovery voltage band must lie strictly inside the alarm band"),
+  low_power_factor: z.object({
+    ...common,
+    min_power_factor: z.number().positive().lt(1).default(0.8),
+    recovery_power_factor: z.number().positive().max(1).default(0.9),
+    min_power_w: z.number().positive().max(10000000).default(10),
+  }).strict().refine((p) => p.recovery_power_factor > p.min_power_factor, "Recovery PF must exceed low PF threshold"),
+  daily_record_missing: z.object({ due_hour: z.number().int().min(0).max(23).default(16) }).strict(),
+  cycle_overdue: z.object({ grace_days: z.number().int().min(0).max(30).default(0) }).strict(),
   device_offline: z
     .object({
       stale_after_seconds: z.number().int().min(30).max(86400).default(120),
@@ -85,6 +104,9 @@ function validateRule(input) {
           "Missing telemetry alone supports info/warning, not a critical physical-fault claim",
       },
     ]);
+  }
+  if (["daily_record_missing", "cycle_overdue"].includes(parsed.rule_code) && parsed.severity === "critical") {
+    throw new z.ZodError([{ code: "custom", path: ["severity"], message: "Production reminders do not establish a critical physical condition" }]);
   }
   if (
     parsed.severity === "critical" &&

@@ -23,6 +23,8 @@ async function create(user, data) {
       connection,
     );
     if (!farm.is_active) throw httpError(409, "Farm is inactive");
+    const [[count]] = await connection.query("SELECT COUNT(*) AS total FROM coops WHERE farm_id=?", [data.farm_id]);
+    if (Number(count.total) >= 4) throw httpError(409, "A farm supports at most four coops; existing history remains available");
     const coopId = await model.create(data, connection);
     await accessModel.lockUser(user.id, connection);
     await access.resolveDefaultCoop(user, connection);

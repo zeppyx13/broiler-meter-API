@@ -64,6 +64,8 @@ app.use("/api/users", userRoutes);
 app.use("/api/users-admin", userAdminRoutes);
 app.use("/api/upload", uploadRoutes);
 if (isBroiler) {
+  app.use("/api", require("./routes/phase5Domain.routes"));
+  app.use("/api", require("./routes/phase5Monitoring.routes"));
   app.use("/api/farms", require("./routes/farm.routes"));
   app.use("/api/coops", require("./routes/coop.routes"));
   app.use("/api/flock-cycles", require("./routes/flockCycle.routes"));

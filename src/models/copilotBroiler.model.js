@@ -15,9 +15,11 @@ async function conversations(
   connection = db,
 ) {
   const [rows] = await connection.query(
-    `SELECT id, coop_id, flock_cycle_id, title, created_at, updated_at
-     FROM ai_conversations WHERE user_id = ? AND coop_id = ?
-       AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?`,
+    `SELECT c.id, c.coop_id, c.flock_cycle_id, c.title, c.created_at, c.updated_at,
+       (SELECT JSON_UNQUOTE(JSON_EXTRACT(m.context_json, '$.source')) FROM ai_messages m
+        WHERE m.conversation_id=c.id AND m.role IN ('user','assistant') ORDER BY m.id LIMIT 1) AS source
+     FROM ai_conversations c WHERE c.user_id = ? AND c.coop_id = ?
+       AND (? IS NULL OR c.id < ?) ORDER BY c.id DESC LIMIT ?`,
     [userId, coopId, before_id || null, before_id || null, limit],
   );
   return rows;

@@ -13,8 +13,8 @@ async function detail(user, farmId) {
 }
 
 async function create(user, data) {
-  if (!["admin", "manager"].includes(user.role))
-    throw httpError(403, "Only admin or manager may create farms");
+  if (!["admin", "manager"].includes(user.role) && !(await model.ownsAnyFarm(user.id)))
+    throw httpError(403, "Creating a farm requires admin/manager or existing farm ownership");
   return withTransaction(async (connection) => {
     const farmId = await model.create(user.id, data, connection);
     await model.addMember(farmId, user.id, "owner", connection);
