@@ -2,7 +2,9 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const userModel = require("../models/user.model");
-const sendMail = require("../lib/mailer").sendMail;
+function sendMail(message) {
+  return require("../lib/mailer").sendMail(message);
+}
 function sha256(input) {
   return crypto.createHash("sha256").update(input).digest("hex");
 }
@@ -15,7 +17,7 @@ function signToken(user) {
   );
 }
 function generateOtp6() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(crypto.randomInt(100000, 1000000));
 }
 async function register(payload) {
   const existing = await userModel.findByEmail(payload.email);
@@ -32,7 +34,7 @@ async function register(payload) {
     email: payload.email,
     password_hash,
     phone: payload.phone || null,
-    role: "tenant",
+    role: "operator",
   });
 
   const user = await userModel.findById(userId);
@@ -57,6 +59,8 @@ async function login(payload) {
   }
 
   const user = await userModel.findById(userRow.id);
+  const coop = await require("./access.service").resolveDefaultCoop(user);
+  user.default_coop_id = coop ? coop.id : null;
   const token = signToken({ id: user.id, role: user.role, email: user.email });
 
   return { user, token };
@@ -69,6 +73,8 @@ async function me(userId) {
     err.statusCode = 404;
     throw err;
   }
+  const coop = await require("./access.service").resolveDefaultCoop(user);
+  user.default_coop_id = coop ? coop.id : null;
   return user;
 }
 
@@ -233,8 +239,7 @@ async function confirmDeleteAccount(userId, otp) {
     throw err;
   }
 
-  await userModel.clearDeleteOtp(userId);
-  await userModel.hardDeleteUserById(userId);
+  await require("./user.service").deleteAccount(userId);
 
   return { message: "Account deleted" };
 }

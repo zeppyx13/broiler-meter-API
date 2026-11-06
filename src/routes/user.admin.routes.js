@@ -5,7 +5,7 @@ const { requireRole } = require("../middlewares/role.middleware");
 const userAdminController = require("../controllers/user.admin.controller");
 
 router.use(auth);
-router.use(requireRole(["admin", "manager"]));
+router.use(requireRole(["admin"]));
 
 router.get("/", userAdminController.list);
 router.get("/:id", userAdminController.detail);

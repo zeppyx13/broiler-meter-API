@@ -35,8 +35,8 @@ async function createAnnouncement(payload) {
           fcm_token: user.fcm_token,
           title: "Pengumuman Baru 📢",
           body: payload.title,
-          data: { type: "announcement" }
-        }).catch(err => logger.error(`FCM error to ${user.id}:`, err));
+          data: { type: "announcement" },
+        }).catch((err) => logger.error(`FCM error to ${user.id}:`, err));
       }
     }
   } catch (e) {

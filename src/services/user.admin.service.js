@@ -32,8 +32,7 @@ async function deleteUser(id) {
   if (!existing) throw httpError("User not found", 404);
 
   // Cegah hapus diri sendiri — cek di controller lewat req.user.id
-  await userAdminModel.deleteById(id);
-  return { deleted: true };
+  return require("./user.service").deleteAccount(id);
 }
 
 module.exports = { listUsers, getUserDetail, updateUser, deleteUser };

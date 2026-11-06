@@ -6,7 +6,22 @@
   "author": "",
   "type": "commonjs",
   "main": "src/app.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:integration": "node --test tests/broiler.integration.js",
+    "test:phase2": "node --test tests/iotBroiler.integration.js",
+    "test:phase3": "node --test tests/guard.integration.js tests/notificationBroiler.integration.js tests/relayBroiler.integration.js",
+    "test:phase4": "node --test tests/forecast.integration.js tests/ecoAdvisor.integration.js tests/copilotBroiler.integration.js tests/phase4Demo.integration.js",
+    "test:phase5": "node --test tests/phase5Domain.integration.js tests/phase5Monitoring.integration.js",
+    "test:isolated-qa": "node src/scripts/phase5_isolated_qa.js --run",
+    "migrate:preflight": "node src/scripts/migrate_phase5.js",
+    "mqtt:smoke": "node src/scripts/smoke_broiler_mqtt.js",
+    "db:verify": "node src/scripts/verify_broiler_db.js",
+    "seed:demo": "node src/scripts/seed_broiler_demo.js",
+    "seed:phase4-demo": "node src/scripts/seed_broiler_phase4_demo.js",
     "billing:test": "node -e \"require('dotenv').config(); const { runMonthlyBilling } = require('./src/jobs/scheduler'); runMonthlyBilling('2026-01')\"",
     "billing:month": "node src/scripts/runMonthlyBilling.js",
     "billing:prev": "node src/scripts/runMonthlyBillingPrev.js",
@@ -20,7 +35,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "express-rate-limit": "^8.3.2",
-    "firebase-admin": "^13.8.0",
+    "firebase-admin": "^14.5.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "midtrans-client": "^1.4.3",
@@ -29,12 +44,20 @@
     "multer": "^2.1.1",
     "mysql2": "^3.16.0",
     "node-cron": "^4.2.1",
-    "nodemailer": "^7.0.12",
-    "nodemon": "^3.1.11",
-    "sharp": "^0.34.5",
+    "nodemailer": "^10.3.1",
+    "nodemon": "^3.1.14",
+    "sharp": "^0.35.5",
     "socket.io": "^4.8.3",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",
     "zod": "^4.3.4"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  },
+  "overrides": {
+    "nodemon": {
+      "minimatch": "^11.0.5"
+    }
   }
 }
