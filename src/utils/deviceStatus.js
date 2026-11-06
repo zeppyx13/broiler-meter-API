@@ -4,12 +4,13 @@ function staleSeconds() {
 }
 
 function presentDevice(row, now = new Date()) {
-  const seen = row.last_seen_at ? new Date(row.last_seen_at).getTime() : null;
+  const seen = row.last_seen_at ? new Date(row.last_seen_at).getTime() : NaN;
+  const age = now.getTime() - seen;
   const connectivity = !row.is_active
     ? "disabled"
-    : seen == null
+    : !Number.isFinite(age) || age < 0
       ? "unknown"
-      : now.getTime() - seen <= staleSeconds() * 1000
+      : age <= staleSeconds() * 1000
         ? "online"
         : "offline";
   return {

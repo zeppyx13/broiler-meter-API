@@ -89,6 +89,7 @@ const telemetryStateSchema = z.object({
 module.exports = {
   idParam,
   listQuery,
+  emptyQuery: z.object({}).strict(),
   querySchema,
   createSchema,
   updateSchema,

@@ -64,4 +64,4 @@ const maintenanceSchema = z.object({
   reason: z.string().trim().min(8).max(500),
 }).strict();
 
-module.exports = { params, entryParams, historyQuery, listQuery, calibrationSchema, verificationSchema, evidenceSchema, maintenanceSchema, commands };
+module.exports = { params, entryParams, emptyQuery: z.object({}).strict(), historyQuery, listQuery, calibrationSchema, verificationSchema, evidenceSchema, maintenanceSchema, commands };

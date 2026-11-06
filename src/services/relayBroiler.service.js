@@ -62,6 +62,18 @@ function present(relay, now = new Date()) {
   };
 }
 
+function presentCommand(command) {
+  const requested = new Date(command.requested_at).getTime();
+  return {
+    ...command,
+    ...proof,
+    pending: ["queued", "published"].includes(command.status),
+    timeout_at: Number.isFinite(requested)
+      ? new Date(requested + timeoutSeconds() * 1000).toISOString()
+      : null,
+  };
+}
+
 function ensureDevice(device) {
   if (
     device.device_type !== "esp32" ||
@@ -155,13 +167,70 @@ async function update(user, id, payload) {
 
 async function commands(user, id, query) {
   await detail(user, id);
+  await reconcileTimeout(id);
   return {
-    commands: (await model.commands(id, query)).map((command) => ({
-      ...command,
-      ...proof,
-    })),
+    commands: (await model.commands(id, query)).map(presentCommand),
     meta: query,
+    server_time: new Date().toISOString(),
+    command_timeout_seconds: timeoutSeconds(),
   };
+}
+
+// REST recovery must not depend on the Socket.IO connection or the watchdog interval.
+async function reconcileTimeout(id, now = new Date()) {
+  const routing = await routingFor(id);
+  const expired = await withTransaction(async (connection) => {
+    await lockRelay(id, connection, routing);
+    const previous = await model.latestCommand(id, connection);
+    if (!previous || !["queued", "published"].includes(previous.status)) return null;
+    const cutoff = new Date(now.getTime() - timeoutSeconds() * 1000);
+    return await model.expire(previous.id, cutoff, connection)
+      ? model.commandById(previous.id, connection)
+      : null;
+  });
+  if (expired) await emit(sockets, "relay_command_update", {
+    ...presentCommand(expired), relay_id: id, device_id: routing.device_id, coop_id: routing.coop_id,
+  });
+}
+
+async function preflight(user, id) {
+  const relay = await routingFor(id);
+  await access.requireCoop(user, relay.coop_id);
+  await reconcileTimeout(id);
+  const command = await model.latestCommand(id);
+  const device = await devices.findById(relay.device_id);
+  const now = new Date();
+  const pending = command && ["queued", "published"].includes(command.status);
+  const timeoutAt = pending ? presentCommand(command).timeout_at : null;
+  const response = {
+    relay_id: id, allowed: false, reason_code: null, reason: null,
+    pending_command_id: pending ? command.id : null, timeout_at: timeoutAt,
+    retry_after_ms: 0, server_time: now.toISOString(), command_timeout_seconds: timeoutSeconds(), ...proof,
+  };
+  const blocked = (reason_code, reason, retry_after_ms = 0) => ({ ...response, reason_code, reason, retry_after_ms });
+  let coop;
+  try {
+    coop = await access.requireCoop(user, relay.coop_id, "relay:operate");
+  } catch (error) {
+    if (![403, 409].includes(error.statusCode)) throw error;
+    return blocked(error.statusCode === 403 ? "capability_denied" : "inactive_scope", error.message);
+  }
+  if (!device || !device.is_active || coop.status !== "active" || !coop.farm_is_active)
+    return blocked("inactive_target", "Perangkat, kandang, atau farm tidak aktif.");
+  if (!relay.is_enabled || Number(relay.channel) !== 1)
+    return blocked("mapping_disabled", "Aktifkan mapping satu output relay kanal 1 sebelum meminta ON/OFF.");
+  if (device.device_type !== "esp32" || !["3.1", "v3.1"].includes(device.firmware_version))
+    return blocked("unsupported_firmware", "Kontrol memerlukan ESP32 terdaftar dengan firmware v3.1.");
+  const seen = device.last_seen_at ? new Date(device.last_seen_at).getTime() : NaN;
+  if (!Number.isFinite(seen) || now.getTime() - seen > staleSeconds() * 1000 || seen > now.getTime())
+    return blocked("heartbeat_stale", "Heartbeat trusted belum tersedia atau stale; tunggu data perangkat terbaru.");
+  if (pending) return blocked("command_pending", "Perintah sebelumnya masih menunggu batas waktu; jangan kirim ulang otomatis.", Math.max(0, Date.parse(timeoutAt) - now.getTime()));
+  const cooldown = command ? 1000 - (now.getTime() - new Date(command.requested_at).getTime()) : 0;
+  if (cooldown > 0) return blocked("command_cooldown", "Tunggu cooldown perangkat sebelum meminta perintah berikutnya.", cooldown);
+  if (!publisher?.connected) return blocked("broker_not_connected", "Broker MQTT backend belum tersambung; tidak ada perintah yang diterbitkan.");
+  if (publisher.options?.queueQoSZero !== false) return blocked("offline_queue_not_disabled", "Antrean command offline harus dinonaktifkan oleh konfigurasi backend.");
+  if (!process.env.MQTT_CMD_TOKEN) return blocked("command_token_not_configured", "Konfigurasi token command backend belum tersedia.");
+  return { ...response, allowed: true, reason_code: "ready", reason: "Preflight server terpenuhi; setiap POST tetap diperiksa ulang. Hasil fisik perlu verifikasi operator." };
 }
 
 function publishCommand(topic, payload) {
@@ -207,10 +276,10 @@ function publishCommand(topic, payload) {
 
 async function sendCommand(user, id, payload) {
   const routing = await routingFor(id);
-  const now = new Date();
   const reservation = await withTransaction(async (connection) => {
     const { relay, device, coop_id } = await lockRelay(id, connection, routing);
     const coop = await access.requireCoop(user, coop_id, "relay:operate", connection);
+    const now = new Date();
     ensureDevice(device);
     if (
       !relay.is_enabled ||
@@ -227,7 +296,7 @@ async function sendCommand(user, id, payload) {
     if (
       !Number.isFinite(seen) ||
       now.getTime() - seen > staleSeconds() * 1000 ||
-      seen > now.getTime() + 300000
+      seen > now.getTime()
     ) {
       throw httpError(
         409,
@@ -315,7 +384,7 @@ async function sendCommand(user, id, payload) {
         !coop.farm_is_active ||
         !Number.isFinite(seen) ||
         instant - seen > staleSeconds() * 1000 ||
-        seen > instant + 300000
+        seen > instant
       ) {
         throw Object.assign(new Error("Target is no longer available"), {
           relayReason: "target_state_changed",
@@ -361,13 +430,13 @@ async function sendCommand(user, id, payload) {
     return model.commandById(reservation.command.id, connection);
   });
   await emit(targetIo, "relay_command_update", {
-    ...command,
+    ...presentCommand(command),
     relay_id: id,
     device_id: reservation.device.id,
     coop_id: reservation.coop_id,
   });
   return {
-    command: { ...command, ...proof },
+    command: presentCommand(command),
     ...proof,
     publication_semantics:
       "QoS0 transport callback only; no broker PUBACK or device correlation is available",
@@ -378,7 +447,7 @@ async function observeState(
   mapping,
   state,
   date,
-  { source, retained, receivedAt, io, observation },
+  { source, retained, receivedAt, io, observation, result: deviceResult },
 ) {
   if (!["mqtt", "sensor"].includes(source))
     return { outcome: "simulation_ignored" };
@@ -392,13 +461,22 @@ async function observeState(
       connection,
     );
     if (
-      !device.is_active ||
+      !device || !coop || !device.is_active ||
       coop.status !== "active" ||
       !(await model.farmIsActive(coop.farm_id, connection))
     )
       return { outcome: "disabled" };
     const relay = await model.forDevice(device.id, connection);
     if (!relay) return { outcome: "unpaired" };
+    const diagnosticCode = {
+      rejected_invalid_token: "RELAY_COMMAND_INVALID_TOKEN",
+      rejected_invalid_format: "RELAY_COMMAND_INVALID_FORMAT",
+      relay_on_executed: "RELAY_ON_OBSERVED",
+      relay_off_executed: "RELAY_OFF_OBSERVED",
+    }[deviceResult];
+    if (diagnosticCode && !retained) await require("./phase5Monitoring.service").captureDiagnostic(
+      connection, device, diagnosticCode, "real", receivedAt,
+    );
     if (
       (retained && relay.last_reported_at) ||
       (relay.last_reported_at && date <= new Date(relay.last_reported_at))
@@ -417,7 +495,7 @@ async function observeState(
   });
   if (result.relay)
     await emit(io || sockets, "relay_state_update", {
-      ...result.relay,
+      ...present(result.relay, receivedAt),
       relay_id: result.relay.id,
       observed_at: receivedAt,
       source: observation,
@@ -441,7 +519,7 @@ async function observeControlStatus(
     device,
     parsed.data.relay_state,
     parsed.data.recorded_at,
-    { retained, source, receivedAt, io, observation: "control_status" },
+    { retained, source, receivedAt, io, observation: "control_status", result: parsed.data.result },
   );
 }
 
@@ -474,7 +552,7 @@ async function checkTimeouts(io = sockets, now = new Date()) {
     if (!command) continue;
     count++;
     await emit(io, "relay_command_update", {
-      ...command,
+      ...presentCommand(command),
       relay_id: item.relay_id,
       device_id: item.device_id,
       coop_id: item.coop_id,
@@ -490,6 +568,7 @@ module.exports = {
   create,
   update,
   commands,
+  preflight,
   sendCommand,
   observeControlStatus,
   observeTelemetry,

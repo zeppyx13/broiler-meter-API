@@ -6,11 +6,15 @@ const db = require("./src/config/db");
 const logger = require("./src/config/logger");
 const http = require("http");
 const { Server } = require("socket.io");
+const { allowsOrigin, corsOptions, socketPath } = require("./src/config/browserOrigin");
 
 const PORT = process.env.PORT;
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*" },
+  path: socketPath,
+  cors: corsOptions,
+  // WebSocket upgrades are not protected by browser CORS enforcement.
+  allowRequest: (req, callback) => callback(null, allowsOrigin(req.headers.origin)),
 });
 
 app.set("io", io);
@@ -45,7 +49,7 @@ io.on("connection", (socket) => {
     }
     logger.info("MySQL connected");
 
-    server.listen(PORT, () => {
+    server.listen(PORT, process.env.HOST || undefined, () => {
       logger.info(`Server running on http://localhost:${PORT}`);
     });
   } catch (error) {

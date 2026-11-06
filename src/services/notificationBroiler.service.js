@@ -166,6 +166,7 @@ async function list(user, query) {
       page: query.page,
       limit: query.limit,
       total: result.total,
+      has_more: query.page * query.limit < result.total,
       channel: query.channel,
     },
   };

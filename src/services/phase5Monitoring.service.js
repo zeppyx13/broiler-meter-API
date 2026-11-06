@@ -6,13 +6,32 @@ const withTransaction = require("../utils/transaction");
 const httpError = require("../utils/httpError");
 const history = require("../utils/telemetryHistory");
 const { commands } = require("../validators/phase5Monitoring.validator");
+const { presentDevice } = require("../utils/deviceStatus");
 
 let lastPruneAt = 0;
 let pruning = false;
 const diagnosticRates = new Map();
 
 function capabilities() {
-  return { maintenance: false, state: "requires_hardware_acceptance", commands, physical_state_confirmed: false, explanation: "Firmware v3.1 maintenance has no correlated anti-replay acknowledgement. No command transport is enabled." };
+  return { maintenance: false, status_read: true, status_transport: "rest", state: "requires_hardware_acceptance", commands, request_capability: "owner", request_roles: ["owner", "admin"], physical_state_confirmed: false, explanation: "Latest trusted status can be read through REST without MQTT. Physical firmware v3.1 maintenance has no correlated anti-replay acknowledgement; command transport remains blocked." };
+}
+
+async function maintenanceStatus(user, coopId) {
+  await access.requireCoop(user, coopId);
+  const devices = await model.statusDevices(coopId);
+  const relayService = require("./relayBroiler.service");
+  const relayModel = require("../models/relayBroiler.model");
+  const relays = await relayModel.list(user, { coop_id: coopId, page: 1, limit: 100 });
+  const now = new Date();
+  return {
+    coop_id: coopId, source: "real", state: devices.length ? "observed" : "no_devices",
+    devices: devices.slice(0, 100).map((device) => presentDevice(device, now)),
+    relays: relays.map((relay) => relayService.present(relay, now)),
+    truncated: devices.length > 100 || relays.length === 100,
+    capabilities: capabilities(), generated_at: now.toISOString(), actions_executed: false,
+    broker_receipt_confirmed: false, device_acknowledged: false, physical_state_confirmed: false,
+    status_semantics: "Stored trusted heartbeat and device observations only; this read does not contact the device or confirm physical load state",
+  };
 }
 
 // Optional additive storage must never make an un-migrated Phase1–4 ingest fail.
@@ -53,6 +72,11 @@ async function captureDiagnostic(connection, device, code, source, receivedAt) {
     TELEMETRY_RECEIVED: ["info", "Validated telemetry received; scalar provenance is available in telemetry history"],
     DEVICE_LOG_WITHHELD: ["info", "Device diagnostic received; raw text is withheld to protect credentials"],
     INVALID_TIMESTAMP: ["warning", "Telemetry timestamp was rejected; trusted heartbeat was not updated"],
+    MAINTENANCE_BLOCKED: ["warning", "Physical maintenance request audited but not published: firmware correlation, anti-replay and operator acceptance are required"],
+    RELAY_COMMAND_INVALID_TOKEN: ["error", "Device reported an invalid command token; operator must reconcile backend and firmware configuration. This observation is not a correlated command acknowledgement"],
+    RELAY_COMMAND_INVALID_FORMAT: ["error", "Device rejected a command format; no correlated command acknowledgement is available"],
+    RELAY_ON_OBSERVED: ["info", "Device reported relay ON; this is an observation, not correlated command acknowledgement or physical load confirmation"],
+    RELAY_OFF_OBSERVED: ["info", "Device reported relay OFF; this is an observation, not correlated command acknowledgement or physical load confirmation"],
   };
   if (!allowed[code]) return;
   try {
@@ -186,9 +210,10 @@ async function maintenance(user, coopId, input) {
     if (!device || Number(device.coop_id) !== Number(coopId)) throw httpError(404, "Device not found in this coop");
     const request = await model.maintenance(connection, coopId, user.id, input);
     if (Number(request.coop_id) !== Number(coopId) || Number(request.device_id) !== Number(input.device_id) || request.command !== input.command || request.reason !== input.reason) throw httpError(409, "request_id was already used for a different maintenance request");
+    await captureDiagnostic(connection, device, "MAINTENANCE_BLOCKED", "real", new Date());
     return request;
   });
   return { request: result, ...capabilities(), actions_executed: false };
 }
 
-module.exports = { capture, pruneIfDue, captureDiagnostic, telemetryHistory, diagnostics, listCalibrations, createCalibration, verifyCalibration: (user, coopId, id, input) => verify(user, coopId, id, input, "sensor_calibrations"), listEvidence, createEvidence, verifyEvidence: (user, coopId, id, input) => verify(user, coopId, id, input, "field_validation_events"), validationReport, maintenance, capabilities, evidenceReport };
+module.exports = { capture, pruneIfDue, captureDiagnostic, telemetryHistory, diagnostics, listCalibrations, createCalibration, verifyCalibration: (user, coopId, id, input) => verify(user, coopId, id, input, "sensor_calibrations"), listEvidence, createEvidence, verifyEvidence: (user, coopId, id, input) => verify(user, coopId, id, input, "field_validation_events"), validationReport, maintenance, maintenanceStatus, capabilities, evidenceReport };

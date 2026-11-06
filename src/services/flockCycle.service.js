@@ -1,4 +1,5 @@
 const model = require("../models/flockCycle.model");
+const domainModel = require("../models/phase5Domain.model");
 const access = require("./access.service");
 const withTransaction = require("../utils/transaction");
 const httpError = require("../utils/httpError");
@@ -97,6 +98,13 @@ async function recordEvent(user, id, payload) {
       user.id,
       connection,
     );
+    // Backdated events must preserve every historical population, not just today's total.
+    const timeline = await domainModel.populationTimeline(id, connection);
+    let historicalPopulation = Number(cycle.initial_population);
+    for (const day of timeline) {
+      historicalPopulation += Number(day.delta);
+      checkPopulation(historicalPopulation, coop.capacity_birds);
+    }
     await model.updatePopulation(id, population, connection);
     return {
       event_id: eventId,

@@ -108,7 +108,7 @@ async function updatePlannedDate(cycleId,date,connection) {
 }
 async function reportExtras(cycleId,source,connection=db) {
   const [[row]] = await connection.query(
-    "SELECT COUNT(*) AS guard_events FROM alerts WHERE flock_cycle_id=? AND source=?", [cycleId,source]);
+    "SELECT COUNT(*) AS guard_events FROM alerts WHERE flock_cycle_id=? AND (?='simulation' AND source='simulation' OR ?='real' AND source<>'simulation')", [cycleId,source,source]);
   const [forecasts] = await connection.query("SELECT id,metric,horizon,predicted_value,confidence,generated_at FROM forecasts WHERE flock_cycle_id=? AND is_simulated=? ORDER BY id DESC LIMIT 30", [cycleId,source === 'simulation' ? 1 : 0]);
   const [recommendations] = await connection.query("SELECT id,title,category,status,estimated_savings_idr,generated_at FROM eco_recommendations WHERE flock_cycle_id=? AND source=? ORDER BY id DESC LIMIT 30", [cycleId,source === 'simulation' ? 'simulation' : 'rule']);
   return {guard_events:Number(row.guard_events),forecasts,recommendations};

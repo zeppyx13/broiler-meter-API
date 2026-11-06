@@ -11,6 +11,7 @@ router.patch("/:id", controller.update);
 router.put("/:id", controller.update);
 router.delete("/:id", controller.remove);
 router.get("/:id/commands", controller.commands);
+router.get("/:id/preflight", controller.preflight);
 router.post("/:id/commands", relayLimiter, controller.sendCommand);
 
 module.exports = router;

@@ -93,6 +93,8 @@ const eventFields = {
     "observed_at",
     "source",
     "retained",
+    "device_acknowledged",
+    "physical_state_confirmed",
   ],
   relay_command_update: [
     "id",
@@ -108,6 +110,10 @@ const eventFields = {
     "published_at",
     "acked_at",
     "failure_reason",
+    "timeout_at",
+    "pending",
+    "device_acknowledged",
+    "physical_state_confirmed",
   ],
   meter_update: [
     ...commonFields,
@@ -243,14 +249,18 @@ function attach(io) {
       const user = await currentUser(socket);
       socket.data.broilerUserId = user.id;
       next();
-    } catch {
-      const error = new Error("Unauthorized");
-      error.data = { statusCode: 401 };
+    } catch (cause) {
+      const unauthorized = cause.statusCode === 401;
+      const error = new Error(unauthorized ? "Unauthorized" : "Socket authentication unavailable");
+      error.data = { statusCode: unauthorized ? 401 : 503 };
       next(error);
     }
   });
   io.on("connection", (socket) => {
-    socket.on("coop:subscribe", async (payload, acknowledge) => {
+    // Serialize authorization/join/leave so a late async subscribe cannot undo an unsubscribe.
+    let subscriptions = Promise.resolve();
+    socket.on("coop:subscribe", (payload, acknowledge) => {
+      subscriptions = subscriptions.then(async () => {
       const reply = typeof acknowledge === "function" ? acknowledge : () => {};
       try {
         const { coop_id } = subscriptionSchema.parse(payload);
@@ -263,8 +273,10 @@ function attach(io) {
         reply(failure(error));
         if (error.statusCode === 401) socket.disconnect(true);
       }
+      }).catch(() => {});
     });
-    socket.on("coop:unsubscribe", async (payload, acknowledge) => {
+    socket.on("coop:unsubscribe", (payload, acknowledge) => {
+      subscriptions = subscriptions.then(async () => {
       const reply = typeof acknowledge === "function" ? acknowledge : () => {};
       try {
         const { coop_id } = subscriptionSchema.parse(payload);
@@ -274,6 +286,7 @@ function attach(io) {
       } catch (error) {
         reply(failure(error));
       }
+      }).catch(() => {});
     });
   });
 }

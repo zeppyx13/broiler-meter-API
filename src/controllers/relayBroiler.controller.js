@@ -43,6 +43,11 @@ async function commands(req, res) {
     await service.commands(req.user, id, schema.listQuery.parse(req.query)),
   );
 }
+async function preflight(req, res) {
+  const { id } = schema.idParam.parse(req.params);
+  schema.emptyQuery.parse(req.query);
+  return ok(res, await service.preflight(req.user, id));
+}
 async function sendCommand(req, res) {
   const { id } = schema.idParam.parse(req.params);
   const result = await service.sendCommand(
@@ -79,5 +84,6 @@ module.exports = {
   update,
   remove,
   commands,
+  preflight,
   sendCommand,
 };

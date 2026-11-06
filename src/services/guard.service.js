@@ -444,6 +444,7 @@ async function status(user, query) {
     evaluations: (await model.rules(coop.id)).map((rule) => ({
       rule_id: rule.id,
       rule_code: rule.rule_code,
+      is_active: Boolean(rule.is_active),
       ...(evaluations.get(`${rule.id}:${query.source}`) || {
         status: "not_evaluated",
         checked_at: null,

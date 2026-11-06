@@ -80,7 +80,7 @@ async function farmIsActive(id, connection) {
   return Boolean(row?.is_active);
 }
 
-async function latestCommand(relayId, connection) {
+async function latestCommand(relayId, connection = db) {
   // Caller holds farm/coop/device/relay locks before its first consistent read.
   // A locking empty range could take a shared supremum gap across unrelated relays.
   const [rows] = await connection.query(

@@ -16,4 +16,8 @@ async function maintenance(req, res) {
   const data = await service.maintenance(req.user, id(req), schema.maintenanceSchema.parse(req.body));
   return res.status(409).json({ success: false, message: "requires_hardware_acceptance", data });
 }
-module.exports = { history, diagnostics, calibrations, createCalibration, verifyCalibration, evidence, createEvidence, verifyEvidence, report, maintenance };
+async function maintenanceStatus(req, res) {
+  schema.emptyQuery.parse(req.query);
+  return ok(res, await service.maintenanceStatus(req.user, id(req)));
+}
+module.exports = { history, diagnostics, calibrations, createCalibration, verifyCalibration, evidence, createEvidence, verifyEvidence, report, maintenance, maintenanceStatus };

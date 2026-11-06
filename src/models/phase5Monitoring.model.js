@@ -36,6 +36,13 @@ async function device(id, connection = db) {
   const [[row]] = await connection.query("SELECT id,coop_id,is_active,last_seen_at FROM devices WHERE id=?", [id]);
   return row || null;
 }
+async function statusDevices(coopId) {
+  const [rows] = await db.query(
+    "SELECT id,coop_id,name,device_uid,device_type,firmware_version,is_active,last_seen_at FROM devices WHERE coop_id=? ORDER BY id LIMIT 101",
+    [coopId],
+  );
+  return rows;
+}
 async function calibrations(coopId, query) {
   const [rows] = await db.query(
     `SELECT * FROM sensor_calibrations WHERE coop_id=? AND source=? AND (? IS NULL OR id<?) ORDER BY id DESC LIMIT ?`,
@@ -78,7 +85,8 @@ async function maintenance(connection, coopId, userId, input) {
   const [[previous]] = await connection.query("SELECT * FROM maintenance_requests WHERE requested_by=? AND request_id=? FOR UPDATE", [userId, input.request_id]);
   if (previous) return previous;
   const [created] = await connection.query("INSERT INTO maintenance_requests (coop_id,device_id,requested_by,request_id,command,reason) VALUES (?,?,?,?,?,?)", [coopId, input.device_id, userId, input.request_id, input.command, input.reason]);
-  return { id: created.insertId, coop_id: coopId, device_id: input.device_id, command: input.command, reason: input.reason, status: "blocked_hardware_acceptance" };
+  const [[request]] = await connection.query("SELECT * FROM maintenance_requests WHERE id=?", [created.insertId]);
+  return request;
 }
 
-module.exports = { insertSample, prune, history, diagnostic, diagnostics, device, calibrations, createCalibration, entry, verify, createEvidence, evidence, alert, maintenance };
+module.exports = { insertSample, prune, history, diagnostic, diagnostics, device, statusDevices, calibrations, createCalibration, entry, verify, createEvidence, evidence, alert, maintenance };
