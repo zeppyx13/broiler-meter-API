@@ -81,8 +81,20 @@ function errorHandler(err, req, res, next) {
 
   return res.status(statusCode).json({
     success: false,
-    message: err.code === "migration_required" ? "Phase 5 database migration is required; ask the operator to apply the reviewed migration after backup" : statusCode >= 500 ? "Internal server error" : message,
-    ...(err.code === "migration_required" ? { code: "migration_required" } : {}),
+    message:
+      err.code === "maintenance_migration_required"
+        ? "maintenance_migration_required: operator must review backup and additive migration 007 before activation"
+        : err.code === "migration_required"
+          ? "Phase 5 database migration is required; ask the operator to apply the reviewed migration after backup"
+          : statusCode >= 500
+            ? "Internal server error"
+            : message,
+    ...(err.code === "migration_required"
+      ? { code: "migration_required" }
+      : {}),
+    ...(err.code === "maintenance_migration_required"
+      ? { code: "maintenance_migration_required" }
+      : {}),
     ...(errors ? { errors } : {}),
   });
 }

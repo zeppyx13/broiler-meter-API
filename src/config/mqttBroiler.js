@@ -4,6 +4,7 @@ const service = require("../services/iotBroiler.service");
 const diagnostics = require("../utils/mqttDiagnostics");
 const phase3 = require("../services/broilerPhase3Runtime.service");
 const relays = require("../services/relayBroiler.service");
+const maintenance = require("../services/maintenanceBroiler.service");
 let activeRuntime = null;
 
 const topics = [
@@ -20,6 +21,7 @@ function start({ io, connect = mqtt.connect } = {}) {
   // SMTP has its own in-flight gate and cannot hold the Guard watchdog.
   const timer = setInterval(() => {
     void phase3.tick();
+    void maintenance.checkTimeouts();
   }, 30000);
   timer.unref();
   let client = null;
@@ -30,6 +32,7 @@ function start({ io, connect = mqtt.connect } = {}) {
     async stop() {
       clearInterval(timer);
       relays.configure();
+      maintenance.configure();
       await phase3.stop();
       if (client)
         await new Promise((resolve) => client.end(false, {}, resolve));
@@ -37,6 +40,7 @@ function start({ io, connect = mqtt.connect } = {}) {
     },
   };
   relays.configure({ io });
+  maintenance.configure({ io });
   if (process.env.BROILER_MQTT_ENABLED === "false") {
     logger.info("Broiler MQTT disabled by environment");
     return activeRuntime;
@@ -62,6 +66,7 @@ function start({ io, connect = mqtt.connect } = {}) {
     queueQoSZero: false,
   });
   relays.configure({ client, io });
+  maintenance.configure({ client, io });
   client.on("connect", () => {
     logger.info(`Broiler MQTT connected pid=${process.pid}`);
     client.subscribe(topics, { qos: 1 }, (error, grants) => {

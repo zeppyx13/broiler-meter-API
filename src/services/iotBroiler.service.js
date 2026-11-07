@@ -241,9 +241,21 @@ async function ingestTelemetry(
     }
     // The bounded instantaneous series is independent from the latest-snapshot cursor.
     // Old-but-valid samples may fill history, without overwriting live data or heartbeat.
-    const historyResult = await monitoringHistory.capture(connection, device, payload, source, receivedAt);
+    const historyResult = await monitoringHistory.capture(
+      connection,
+      device,
+      payload,
+      source,
+      receivedAt,
+    );
     historyCaptured = historyResult.state === "stored";
-    await monitoringHistory.captureDiagnostic(connection, device, "TELEMETRY_RECEIVED", source, receivedAt);
+    await monitoringHistory.captureDiagnostic(
+      connection,
+      device,
+      "TELEMETRY_RECEIVED",
+      source,
+      receivedAt,
+    );
     context.stage = "heartbeat";
     const lastSeen =
       source !== "simulation" && heartbeat
@@ -353,6 +365,24 @@ async function handleMessage(
     if (parsed.kind === "diagnostic") return { outcome: "diagnostic_ignored" };
     if (parsed.kind === "control_status") {
       context.stage = "relay_observation";
+      // Already parsed against the strict firmware allowlist; raw logs remain withheld.
+      // This records generic observations only, never an acknowledgement for a request UUID.
+      try {
+        await require("./maintenanceBroiler.service").observeControlStatus(
+          parsed.key,
+          parsed.payload,
+          { source, receivedAt, retained },
+        );
+      } catch (error) {
+        diagnostics.report(
+          {
+            ...context,
+            outcome: "processing_error",
+            reason_code: "MAINTENANCE_OBSERVATION_FAILED",
+          },
+          error,
+        );
+      }
       return await require("./relayBroiler.service").observeControlStatus(
         parsed.key,
         parsed.payload,

@@ -18,6 +18,31 @@ const commonFields = [
   "is_latest",
 ];
 const eventFields = {
+  maintenance_request_update: [
+    "id",
+    "request_id",
+    "coop_id",
+    "device_id",
+    "command",
+    "requested_by",
+    "requested_at",
+    "status",
+    "accepted_at",
+    "publish_attempted_at",
+    "published_at",
+    "timeout_at",
+    "completed_at",
+    "failure_reason",
+    "pending",
+    "transport",
+    "publication_semantics",
+    "observation",
+    "executed",
+    "actions_executed",
+    "broker_receipt_confirmed",
+    "device_acknowledged",
+    "physical_state_confirmed",
+  ],
   alert_created: [
     "id",
     "coop_id",
@@ -251,7 +276,9 @@ function attach(io) {
       next();
     } catch (cause) {
       const unauthorized = cause.statusCode === 401;
-      const error = new Error(unauthorized ? "Unauthorized" : "Socket authentication unavailable");
+      const error = new Error(
+        unauthorized ? "Unauthorized" : "Socket authentication unavailable",
+      );
       error.data = { statusCode: unauthorized ? 401 : 503 };
       next(error);
     }
@@ -260,33 +287,42 @@ function attach(io) {
     // Serialize authorization/join/leave so a late async subscribe cannot undo an unsubscribe.
     let subscriptions = Promise.resolve();
     socket.on("coop:subscribe", (payload, acknowledge) => {
-      subscriptions = subscriptions.then(async () => {
-      const reply = typeof acknowledge === "function" ? acknowledge : () => {};
-      try {
-        const { coop_id } = subscriptionSchema.parse(payload);
-        const user = await currentUser(socket);
-        await access.requireCoop(user, coop_id);
-        if (!socket.connected) return;
-        await socket.join(roomName(coop_id));
-        reply({ success: true, data: { coop_id, room: roomName(coop_id) } });
-      } catch (error) {
-        reply(failure(error));
-        if (error.statusCode === 401) socket.disconnect(true);
-      }
-      }).catch(() => {});
+      subscriptions = subscriptions
+        .then(async () => {
+          const reply =
+            typeof acknowledge === "function" ? acknowledge : () => {};
+          try {
+            const { coop_id } = subscriptionSchema.parse(payload);
+            const user = await currentUser(socket);
+            await access.requireCoop(user, coop_id);
+            if (!socket.connected) return;
+            await socket.join(roomName(coop_id));
+            reply({
+              success: true,
+              data: { coop_id, room: roomName(coop_id) },
+            });
+          } catch (error) {
+            reply(failure(error));
+            if (error.statusCode === 401) socket.disconnect(true);
+          }
+        })
+        .catch(() => {});
     });
     socket.on("coop:unsubscribe", (payload, acknowledge) => {
-      subscriptions = subscriptions.then(async () => {
-      const reply = typeof acknowledge === "function" ? acknowledge : () => {};
-      try {
-        const { coop_id } = subscriptionSchema.parse(payload);
-        await socket.leave(roomName(coop_id));
-        clearWatermarks(socket, coop_id);
-        reply({ success: true, data: { coop_id } });
-      } catch (error) {
-        reply(failure(error));
-      }
-      }).catch(() => {});
+      subscriptions = subscriptions
+        .then(async () => {
+          const reply =
+            typeof acknowledge === "function" ? acknowledge : () => {};
+          try {
+            const { coop_id } = subscriptionSchema.parse(payload);
+            await socket.leave(roomName(coop_id));
+            clearWatermarks(socket, coop_id);
+            reply({ success: true, data: { coop_id } });
+          } catch (error) {
+            reply(failure(error));
+          }
+        })
+        .catch(() => {});
     });
   });
 }

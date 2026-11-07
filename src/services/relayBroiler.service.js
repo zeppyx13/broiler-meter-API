@@ -182,15 +182,20 @@ async function reconcileTimeout(id, now = new Date()) {
   const expired = await withTransaction(async (connection) => {
     await lockRelay(id, connection, routing);
     const previous = await model.latestCommand(id, connection);
-    if (!previous || !["queued", "published"].includes(previous.status)) return null;
+    if (!previous || !["queued", "published"].includes(previous.status))
+      return null;
     const cutoff = new Date(now.getTime() - timeoutSeconds() * 1000);
-    return await model.expire(previous.id, cutoff, connection)
+    return (await model.expire(previous.id, cutoff, connection))
       ? model.commandById(previous.id, connection)
       : null;
   });
-  if (expired) await emit(sockets, "relay_command_update", {
-    ...presentCommand(expired), relay_id: id, device_id: routing.device_id, coop_id: routing.coop_id,
-  });
+  if (expired)
+    await emit(sockets, "relay_command_update", {
+      ...presentCommand(expired),
+      relay_id: id,
+      device_id: routing.device_id,
+      coop_id: routing.coop_id,
+    });
 }
 
 async function preflight(user, id) {
@@ -203,34 +208,110 @@ async function preflight(user, id) {
   const pending = command && ["queued", "published"].includes(command.status);
   const timeoutAt = pending ? presentCommand(command).timeout_at : null;
   const response = {
-    relay_id: id, allowed: false, reason_code: null, reason: null,
-    pending_command_id: pending ? command.id : null, timeout_at: timeoutAt,
-    retry_after_ms: 0, server_time: now.toISOString(), command_timeout_seconds: timeoutSeconds(), ...proof,
+    relay_id: id,
+    allowed: false,
+    reason_code: null,
+    reason: null,
+    pending_command_id: pending ? command.id : null,
+    timeout_at: timeoutAt,
+    retry_after_ms: 0,
+    server_time: now.toISOString(),
+    command_timeout_seconds: timeoutSeconds(),
+    ...proof,
   };
-  const blocked = (reason_code, reason, retry_after_ms = 0) => ({ ...response, reason_code, reason, retry_after_ms });
+  const blocked = (reason_code, reason, retry_after_ms = 0) => ({
+    ...response,
+    reason_code,
+    reason,
+    retry_after_ms,
+  });
   let coop;
   try {
     coop = await access.requireCoop(user, relay.coop_id, "relay:operate");
   } catch (error) {
     if (![403, 409].includes(error.statusCode)) throw error;
-    return blocked(error.statusCode === 403 ? "capability_denied" : "inactive_scope", error.message);
+    return blocked(
+      error.statusCode === 403 ? "capability_denied" : "inactive_scope",
+      error.message,
+    );
   }
-  if (!device || !device.is_active || coop.status !== "active" || !coop.farm_is_active)
-    return blocked("inactive_target", "Perangkat, kandang, atau farm tidak aktif.");
+  if (
+    !device ||
+    !device.is_active ||
+    coop.status !== "active" ||
+    !coop.farm_is_active
+  )
+    return blocked(
+      "inactive_target",
+      "Perangkat, kandang, atau farm tidak aktif.",
+    );
   if (!relay.is_enabled || Number(relay.channel) !== 1)
-    return blocked("mapping_disabled", "Aktifkan mapping satu output relay kanal 1 sebelum meminta ON/OFF.");
-  if (device.device_type !== "esp32" || !["3.1", "v3.1"].includes(device.firmware_version))
-    return blocked("unsupported_firmware", "Kontrol memerlukan ESP32 terdaftar dengan firmware v3.1.");
-  const seen = device.last_seen_at ? new Date(device.last_seen_at).getTime() : NaN;
-  if (!Number.isFinite(seen) || now.getTime() - seen > staleSeconds() * 1000 || seen > now.getTime())
-    return blocked("heartbeat_stale", "Heartbeat trusted belum tersedia atau stale; tunggu data perangkat terbaru.");
-  if (pending) return blocked("command_pending", "Perintah sebelumnya masih menunggu batas waktu; jangan kirim ulang otomatis.", Math.max(0, Date.parse(timeoutAt) - now.getTime()));
-  const cooldown = command ? 1000 - (now.getTime() - new Date(command.requested_at).getTime()) : 0;
-  if (cooldown > 0) return blocked("command_cooldown", "Tunggu cooldown perangkat sebelum meminta perintah berikutnya.", cooldown);
-  if (!publisher?.connected) return blocked("broker_not_connected", "Broker MQTT backend belum tersambung; tidak ada perintah yang diterbitkan.");
-  if (publisher.options?.queueQoSZero !== false) return blocked("offline_queue_not_disabled", "Antrean command offline harus dinonaktifkan oleh konfigurasi backend.");
-  if (!process.env.MQTT_CMD_TOKEN) return blocked("command_token_not_configured", "Konfigurasi token command backend belum tersedia.");
-  return { ...response, allowed: true, reason_code: "ready", reason: "Preflight server terpenuhi; setiap POST tetap diperiksa ulang. Hasil fisik perlu verifikasi operator." };
+    return blocked(
+      "mapping_disabled",
+      "Aktifkan mapping satu output relay kanal 1 sebelum meminta ON/OFF.",
+    );
+  if (
+    device.device_type !== "esp32" ||
+    !["3.1", "v3.1"].includes(device.firmware_version)
+  )
+    return blocked(
+      "unsupported_firmware",
+      "Kontrol memerlukan ESP32 terdaftar dengan firmware v3.1.",
+    );
+  const seen = device.last_seen_at
+    ? new Date(device.last_seen_at).getTime()
+    : NaN;
+  if (
+    !Number.isFinite(seen) ||
+    now.getTime() - seen > staleSeconds() * 1000 ||
+    seen > now.getTime()
+  )
+    return blocked(
+      "heartbeat_stale",
+      "Heartbeat trusted belum tersedia atau stale; tunggu data perangkat terbaru.",
+    );
+  if (pending)
+    return blocked(
+      "command_pending",
+      "Perintah sebelumnya masih menunggu batas waktu; jangan kirim ulang otomatis.",
+      Math.max(0, Date.parse(timeoutAt) - now.getTime()),
+    );
+  if (await require("./maintenanceBroiler.service").busyForDevice(device.id))
+    return blocked(
+      "maintenance_pending",
+      "Maintenance perangkat masih pending; baca status Terminal sebelum mengoperasikan relay.",
+    );
+  const cooldown = command
+    ? 1000 - (now.getTime() - new Date(command.requested_at).getTime())
+    : 0;
+  if (cooldown > 0)
+    return blocked(
+      "command_cooldown",
+      "Tunggu cooldown perangkat sebelum meminta perintah berikutnya.",
+      cooldown,
+    );
+  if (!publisher?.connected)
+    return blocked(
+      "broker_not_connected",
+      "Broker MQTT backend belum tersambung; tidak ada perintah yang diterbitkan.",
+    );
+  if (publisher.options?.queueQoSZero !== false)
+    return blocked(
+      "offline_queue_not_disabled",
+      "Antrean command offline harus dinonaktifkan oleh konfigurasi backend.",
+    );
+  if (!process.env.MQTT_CMD_TOKEN)
+    return blocked(
+      "command_token_not_configured",
+      "Konfigurasi token command backend belum tersedia.",
+    );
+  return {
+    ...response,
+    allowed: true,
+    reason_code: "ready",
+    reason:
+      "Preflight server terpenuhi; setiap POST tetap diperiksa ulang. Hasil fisik perlu verifikasi operator.",
+  };
 }
 
 function publishCommand(topic, payload) {
@@ -278,9 +359,24 @@ async function sendCommand(user, id, payload) {
   const routing = await routingFor(id);
   const reservation = await withTransaction(async (connection) => {
     const { relay, device, coop_id } = await lockRelay(id, connection, routing);
-    const coop = await access.requireCoop(user, coop_id, "relay:operate", connection);
+    const coop = await access.requireCoop(
+      user,
+      coop_id,
+      "relay:operate",
+      connection,
+    );
     const now = new Date();
     ensureDevice(device);
+    if (
+      await require("./maintenanceBroiler.service").busyForDevice(
+        device.id,
+        connection,
+      )
+    )
+      throw httpError(
+        409,
+        "Device maintenance is pending; relay command was not published",
+      );
     if (
       !relay.is_enabled ||
       relay.channel !== 1 ||
@@ -373,6 +469,15 @@ async function sendCommand(user, id, payload) {
         });
       }
       ensureDevice(device);
+      if (
+        await require("./maintenanceBroiler.service").busyForDevice(
+          device.id,
+          connection,
+        )
+      )
+        throw Object.assign(new Error("Device maintenance is pending"), {
+          relayReason: "maintenance_pending",
+        });
       const seen = device.last_seen_at
         ? new Date(device.last_seen_at).getTime()
         : NaN;
@@ -412,6 +517,7 @@ async function sendCommand(user, id, payload) {
               "reservation_no_longer_queued",
               "reservation_expired",
               "target_state_changed",
+              "maintenance_pending",
             ].includes(error.relayReason)
           ? error.relayReason
           : error.statusCode === 403
@@ -461,7 +567,9 @@ async function observeState(
       connection,
     );
     if (
-      !device || !coop || !device.is_active ||
+      !device ||
+      !coop ||
+      !device.is_active ||
       coop.status !== "active" ||
       !(await model.farmIsActive(coop.farm_id, connection))
     )
@@ -474,9 +582,14 @@ async function observeState(
       relay_on_executed: "RELAY_ON_OBSERVED",
       relay_off_executed: "RELAY_OFF_OBSERVED",
     }[deviceResult];
-    if (diagnosticCode && !retained) await require("./phase5Monitoring.service").captureDiagnostic(
-      connection, device, diagnosticCode, "real", receivedAt,
-    );
+    if (diagnosticCode && !retained)
+      await require("./phase5Monitoring.service").captureDiagnostic(
+        connection,
+        device,
+        diagnosticCode,
+        "real",
+        receivedAt,
+      );
     if (
       (retained && relay.last_reported_at) ||
       (relay.last_reported_at && date <= new Date(relay.last_reported_at))
@@ -519,7 +632,14 @@ async function observeControlStatus(
     device,
     parsed.data.relay_state,
     parsed.data.recorded_at,
-    { retained, source, receivedAt, io, observation: "control_status", result: parsed.data.result },
+    {
+      retained,
+      source,
+      receivedAt,
+      io,
+      observation: "control_status",
+      result: parsed.data.result,
+    },
   );
 }
 
