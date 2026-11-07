@@ -1,9 +1,9 @@
 const { z } = require("zod");
 
 const includeSimulation = z
-  .enum(["true", "false"])
+  .literal("false")
   .default("false")
-  .transform((value) => value === "true");
+  .transform(() => false);
 const summaryQuery = z
   .object({
     coop_id: z.coerce

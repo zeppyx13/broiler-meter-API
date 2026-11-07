@@ -25,13 +25,13 @@ async function create(user, data) {
     const coop = await access.requireCoop(
       user,
       data.coop_id,
-      "manage",
+      "owner",
       connection,
     );
     if (coop.status !== "active" || !coop.farm_is_active)
       throw httpError(409, "Coop or farm is inactive");
     const id = await model.create(data, connection);
-    return { device: presentDevice(await model.lockById(id, connection)) };
+    return { device: presentDevice(await model.findById(id, connection)) };
   });
 }
 
@@ -43,7 +43,7 @@ async function update(user, id, data) {
     const coop = await access.requireCoop(
       user,
       existing.coop_id,
-      "manage",
+      "owner",
       connection,
     );
     const device = await model.lockById(id, connection);
@@ -54,7 +54,7 @@ async function update(user, id, data) {
       throw httpError(409, "Coop or farm is inactive");
     }
     await model.update(id, { ...device, ...data }, connection);
-    return { device: presentDevice(await model.lockById(id, connection)) };
+    return { device: presentDevice(await model.findById(id, connection)) };
   });
 }
 

@@ -22,7 +22,7 @@ async function capabilities(user,coopId) {
   const manager = user.role === "admin" || ["owner","manager"].includes(coop.member_role);
   const assigned = coop.member_role === "operator" && migrated ? await model.assignment(coopId,user.id) : null;
   const operate = manager || (coop.member_role === "operator" && (!migrated || Boolean(assigned?.can_operate)));
-  return {coop_id:coopId,member_role:coop.member_role || (user.role === "admin" ? "admin" : null),assignment_policy:migrated ? "coop_scoped_operator" : "legacy_farm_membership_until_migration",capabilities:{read:true,operate,manage:manager,"relay:operate":manager || Boolean(assigned?.can_operate && assigned?.relay_operate)}};
+  return {coop_id:coopId,member_role:coop.member_role || (user.role === "admin" ? "admin" : null),assignment_policy:migrated ? "coop_scoped_operator" : "legacy_farm_membership_until_migration",capabilities:{read:true,operate,manage:manager,"relay:operate":user.role === "admin" || coop.member_role === "owner"}};
 }
 async function listAssignments(user,coopId) {
   const coop = await access.requireCoop(user,coopId,"manage");

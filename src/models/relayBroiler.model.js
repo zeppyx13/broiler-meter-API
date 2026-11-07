@@ -1,6 +1,14 @@
 const db = require("../config/db");
 const scope = require("../utils/coopScope");
 
+async function actor(id, connection = db) {
+  const [[row]] = await connection.query(
+    "SELECT id, role FROM users WHERE id = ? LOCK IN SHARE MODE",
+    [id],
+  );
+  return row || null;
+}
+
 async function list(
   user,
   { device_id = null, coop_id = null, page, limit },
@@ -174,6 +182,7 @@ async function reportState(id, state, date, connection) {
 }
 
 module.exports = {
+  actor,
   list,
   findById,
   lockById,

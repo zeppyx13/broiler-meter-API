@@ -204,7 +204,9 @@ async function summary(user, query) {
     cycle_totals: computed
       ? totals(computed.real, Number(cycle.current_population))
       : null,
-    devices: devices.map((device) => presentDevice(device)),
+    devices: devices
+      .filter((device) => device.data_provenance !== "simulation")
+      .map((device) => presentDevice(device)),
     definitions,
     generated_at: new Date().toISOString(),
   };
@@ -214,21 +216,6 @@ async function summary(user, query) {
       : result.cycle_totals?.status === "partial"
         ? "partial"
         : live.status;
-  if (query.include_simulation) {
-    result.simulation = {
-      source: "simulation",
-      live: presentLive(snapshot, "simulation"),
-      today:
-        computed?.simulation.find((point) => point.metric_date === date) ||
-        null,
-      cycle_totals: computed
-        ? {
-            ...totals(computed.simulation, Number(cycle.current_population)),
-            source: "simulation",
-          }
-        : null,
-    };
-  }
   return result;
 }
 
@@ -292,14 +279,6 @@ async function charts(user, query) {
     series: computed.real.map((point) => chartPoint(point, query.metric)),
     definitions,
   };
-  if (query.include_simulation) {
-    result.simulation = {
-      source: "simulation",
-      series: computed.simulation.map((point) =>
-        chartPoint(point, query.metric),
-      ),
-    };
-  }
   return result;
 }
 

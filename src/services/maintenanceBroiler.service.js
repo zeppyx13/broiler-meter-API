@@ -125,25 +125,18 @@ async function currentActor(user, connection) {
     throw httpError(403, "Maintenance authorization revoked");
   return actor;
 }
-function phrase(command, device) {
-  if (command === "reboot") return `REBOOT ${device.device_uid}`;
-  if (command === "clear_buf") return `CLEAR BUFFER ${device.device_uid}`;
-  if (command === "reset_nvs") return `RESET NVS ${device.device_uid}`;
-  return null;
-}
 function requirements(command) {
   const common = [
-    "Hak owner/manager farm atau admin dari server",
+    "Hak owner farm atau admin dari server",
     "Source REAL dan binding device/coop aktif",
     "ESP32 v3.1 terdaftar; versi/binding diverifikasi operator",
     "Heartbeat receipt trusted fresh, health valid, broker tersambung",
-    "Acceptance owner/admin untuk device/command/binding saat ini",
     "Tidak ada command pending; cooldown perangkat telah lewat",
-    "Konfirmasi operator dan alasan; hasil tidak memiliki ACK berkorelasi",
+    "Hasil tidak memiliki ACK berkorelasi dan tidak dikirim ulang otomatis",
   ];
   if (command === "reboot")
     common.push(
-      "Akui koneksi terputus sementara dan ketik identitas perangkat; tidak ada kirim ulang otomatis",
+      "Konfirmasi reboot; koneksi perangkat terputus sementara",
     );
   if (command === "clear_buf")
     common.push(
@@ -165,17 +158,11 @@ async function capability(
   available,
   { ignoreRequestId = null, now = new Date() } = {},
 ) {
-  const accepted = available
-    ? await model.acceptance(device.id, command, connection)
-    : null;
-  const acceptance = publicAcceptance(accepted, device);
   const base = {
     allowed: false,
     reason: "unknown",
     explanation: "",
     prerequisites: requirements(command),
-    confirmation_phrase: phrase(command, device),
-    acceptance,
     command,
     device_id: device.id,
     software_supported: true,
@@ -187,10 +174,10 @@ async function capability(
     explanation,
     http_status: httpStatus,
   });
-  if (user.role !== "admin" && !["owner", "manager"].includes(coop.member_role))
+  if (user.role !== "admin" && coop.member_role !== "owner")
     return deny(
       "capability_denied",
-      "Maintenance memerlukan owner/manager farm atau admin; cookie/frontend tidak memberikan hak ini.",
+      "Maintenance memerlukan owner farm atau admin dalam cakupan perangkat ini.",
       403,
     );
   if (source !== "real")
@@ -198,15 +185,23 @@ async function capability(
       "simulation_read_only",
       "Source SIM tidak boleh mengeksekusi perangkat fisik.",
     );
+  const provenance =
+    device.data_provenance ||
+    (await devices.findById(device.id, connection))?.data_provenance;
+  if (provenance === "simulation")
+    return deny(
+      "non_physical_target",
+      "Registry ini hanya memiliki bukti data historis internal, bukan perangkat REAL.",
+    );
   if (command === "clear_buf")
     return deny(
       "buffer_backup_protocol_required",
-      "Diblokir: firmware v3.1 tidak menyediakan snapshot/backup buffer terpercaya atau bukti rekonsiliasi. Acceptance saja tidak dapat membuka clear_buf.",
+      "Tidak tersedia: perlu perlindungan data perangkat. Firmware v3.1 belum menyediakan inventaris/backup buffer dan rekonsiliasi data yang belum terkirim.",
     );
   if (command === "reset_nvs")
     return deny(
       "counter_epoch_reconciliation_required",
-      "Diblokir: firmware v3.1 tidak menyediakan backup counter/epoch atau verifikasi reset PZEM. Prosedur rekonsiliasi histori harus diselesaikan terpisah; acceptance saja tidak cukup.",
+      "Tidak tersedia: perlu perlindungan data perangkat. Firmware v3.1 belum menyediakan backup counter/epoch dan rekonsiliasi reset air serta PZEM.",
     );
   if (!available)
     return deny(
@@ -231,11 +226,6 @@ async function capability(
     return deny(
       "unsupported_firmware",
       "Daftarkan ESP32 firmware v3.1 yang telah diverifikasi operator; versi tidak disimpulkan dari telemetry.",
-    );
-  if (!acceptance?.accepted)
-    return deny(
-      "requires_hardware_acceptance",
-      "Owner/admin perlu merekam acceptance device/command melalui PUT maintenance/acceptance dengan referensi bukti, identitas firmware/topic dan risiko tanpa ACK; acceptance dapat dicabut.",
     );
   const seen = device.last_seen_at
     ? new Date(device.last_seen_at).getTime()
@@ -318,7 +308,9 @@ async function capability(
 async function status(user, coopId, { source = "real" } = {}) {
   const coop = await access.requireCoop(user, coopId);
   const available = await storageAvailable();
-  const rows = await model.devices(coopId);
+  const rows = (await model.devices(coopId)).filter(
+    (device) => device.data_provenance !== "simulation",
+  );
   const now = new Date();
   const result = [];
   for (const row of rows.slice(0, 100)) {
@@ -354,7 +346,6 @@ async function status(user, coopId, { source = "real" } = {}) {
           reason: "no_devices",
           explanation: "Daftarkan perangkat pada kandang ini.",
           prerequisites: requirements(command),
-          confirmation_phrase: null,
         },
     ]),
   );
@@ -372,13 +363,12 @@ async function status(user, coopId, { source = "real" } = {}) {
       commands: aggregate,
       status_read: true,
       status_transport: "rest",
-      acceptance_manage: user.role === "admin" || coop.member_role === "owner",
       schema_ready: available,
     },
     generated_at: now.toISOString(),
     ...proof,
     status_semantics:
-      "Passive stored REST snapshot only; GET never publishes MQTT. SIM cannot execute hardware.",
+      "Passive stored REST snapshot only; GET never publishes MQTT or confirms physical execution.",
   };
 }
 async function expireScoped(user, coopId, deviceId, now) {
@@ -512,13 +502,13 @@ function publish(topic, payload) {
   });
 }
 async function submit(user, coopId, input) {
-  await access.requireCoop(user, coopId);
+  await access.requireCoop(user, coopId, "owner");
   requireStorage(await storageAvailable());
   const payloadHash = hash([coopId, input]);
   const reservation = await withTransaction(async (connection) => {
     await access.lockCoop(connection, coopId);
     const actor = await currentActor(user, connection);
-    const coop = await access.requireCoop(actor, coopId, "read", connection);
+    const coop = await access.requireCoop(actor, coopId, "owner", connection);
     const device = await devices.lockById(input.device_id, connection);
     if (!device || Number(device.coop_id) !== Number(coopId))
       throw httpError(404, "Device not found in this coop");
@@ -542,7 +532,7 @@ async function submit(user, coopId, input) {
       );
     const now = new Date();
     await model.expireDevice(device.id, now, connection);
-    let preflight = await capability(
+    const preflight = await capability(
       actor,
       coop,
       device,
@@ -552,19 +542,6 @@ async function submit(user, coopId, input) {
       true,
       { now },
     );
-    if (
-      preflight.allowed &&
-      preflight.confirmation_phrase &&
-      input.typed_confirmation !== preflight.confirmation_phrase
-    )
-      preflight = {
-        ...preflight,
-        allowed: false,
-        reason: "typed_confirmation_required",
-        explanation:
-          "Ketik frasa konfirmasi perangkat persis seperti diberikan capability server.",
-        http_status: 400,
-      };
     const id = await model.insertRequest(
       {
         ...input,
@@ -595,7 +572,7 @@ async function submit(user, coopId, input) {
         const coop = await access.requireCoop(
           actor,
           coopId,
-          "read",
+          "owner",
           connection,
         );
         const device = await devices.lockById(input.device_id, connection);

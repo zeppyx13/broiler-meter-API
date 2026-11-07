@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const provenance = require("./deviceProvenance");
 
 const requestSelect = `SELECT r.id,r.coop_id,r.device_id,r.requested_by,r.request_id,r.command,r.reason,r.requested_at,
   d.payload_hash,d.target_fingerprint,d.status,d.http_status,d.preflight_json,d.accepted_at,d.publish_attempted_at,
@@ -17,7 +18,7 @@ async function actor(id, connection) {
 
 async function devices(coopId, connection = db) {
   const [rows] = await connection.query(
-    "SELECT * FROM devices WHERE coop_id=? ORDER BY id LIMIT 101",
+    `SELECT d.*, ${provenance} FROM devices d WHERE d.coop_id=? ORDER BY d.id LIMIT 101`,
     [coopId],
   );
   return rows;

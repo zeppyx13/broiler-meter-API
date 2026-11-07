@@ -1,5 +1,6 @@
 const db = require("../config/db");
 const scope = require("../utils/coopScope");
+const provenance = require("./deviceProvenance");
 
 async function list(
   user,
@@ -8,7 +9,7 @@ async function list(
 ) {
   const scoped = await scope.predicate(connection);
   const [rows] = await connection.query(
-    `SELECT d.*, c.name AS coop_name, f.timezone
+    `SELECT d.*, ${provenance}, c.name AS coop_name, f.timezone
      FROM devices d JOIN coops c ON c.id = d.coop_id JOIN farms f ON f.id = c.farm_id
      LEFT JOIN farm_members m ON m.farm_id = f.id AND m.user_id = ?
      WHERE (? = 'admin' OR (m.user_id IS NOT NULL AND ${scoped}))
@@ -29,9 +30,10 @@ async function list(
 }
 
 async function findById(id, connection = db) {
-  const [rows] = await connection.query("SELECT * FROM devices WHERE id = ?", [
-    id,
-  ]);
+  const [rows] = await connection.query(
+    `SELECT d.*, ${provenance} FROM devices d WHERE d.id = ?`,
+    [id],
+  );
   return rows[0] || null;
 }
 

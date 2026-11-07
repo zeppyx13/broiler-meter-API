@@ -86,6 +86,13 @@ function ensureDevice(device) {
   }
 }
 
+async function requireControl(user, coopId, connection) {
+  const actor = await model.actor(user.id, connection);
+  if (!actor || !["admin", "manager", "operator"].includes(actor.role))
+    throw httpError(403, "Relay authorization revoked");
+  return access.requireCoop(actor, coopId, "owner", connection);
+}
+
 async function routingFor(id) {
   const existing = await model.findById(id);
   if (!existing) throw httpError(404, "Relay not found");
@@ -130,7 +137,7 @@ async function create(user, payload) {
     const coop = await access.requireCoop(
       user,
       existing.coop_id,
-      "manage",
+      "owner",
       connection,
     );
     const device = await devices.lockById(payload.device_id, connection);
@@ -151,7 +158,7 @@ async function update(user, id, payload) {
   const routing = await routingFor(id);
   return withTransaction(async (connection) => {
     const { relay, device, coop_id } = await lockRelay(id, connection, routing);
-    const coop = await access.requireCoop(user, coop_id, "manage", connection);
+    const coop = await access.requireCoop(user, coop_id, "owner", connection);
     if (
       payload.is_enabled === true &&
       (!device.is_active || coop.status !== "active" || !coop.farm_is_active)
@@ -227,7 +234,7 @@ async function preflight(user, id) {
   });
   let coop;
   try {
-    coop = await access.requireCoop(user, relay.coop_id, "relay:operate");
+    coop = await requireControl(user, relay.coop_id);
   } catch (error) {
     if (![403, 409].includes(error.statusCode)) throw error;
     return blocked(
@@ -359,12 +366,7 @@ async function sendCommand(user, id, payload) {
   const routing = await routingFor(id);
   const reservation = await withTransaction(async (connection) => {
     const { relay, device, coop_id } = await lockRelay(id, connection, routing);
-    const coop = await access.requireCoop(
-      user,
-      coop_id,
-      "relay:operate",
-      connection,
-    );
+    const coop = await requireControl(user, coop_id, connection);
     const now = new Date();
     ensureDevice(device);
     if (
@@ -445,12 +447,7 @@ async function sendCommand(user, id, payload) {
         connection,
         routing,
       );
-      const coop = await access.requireCoop(
-        user,
-        coop_id,
-        "relay:operate",
-        connection,
-      );
+      const coop = await requireControl(user, coop_id, connection);
       const queued = await model.lockCommand(
         reservation.command.id,
         connection,

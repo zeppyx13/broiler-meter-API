@@ -138,13 +138,13 @@ const maintenanceSchema = z
     device_id: z.number().int().positive(),
     command: z.enum(commands),
     request_id: z.uuid(),
-    source,
-    confirmation: z.literal("MAINTENANCE ACCEPTED"),
-    reason: z.string().trim().min(8).max(500),
-    typed_confirmation: z.string().max(255).optional(),
+    source: z.literal("real").default("real"),
+    confirmation: z.literal("MAINTENANCE ACCEPTED").optional(),
+    reason: z.string().trim().min(8).max(500)
+      .default("Permintaan terminal oleh operator"),
   })
   .strict();
-const maintenanceQuery = z.object({ source: source.default("real") }).strict();
+const maintenanceQuery = z.object({ source: z.literal("real").default("real") }).strict();
 const maintenanceRequestParams = z.object({ id, requestId: z.uuid() }).strict();
 const maintenanceAcceptanceSchema = z
   .object({

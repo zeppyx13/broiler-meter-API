@@ -15,6 +15,7 @@ function presentDevice(row, now = new Date()) {
         : "offline";
   return {
     ...row,
+    data_provenance: row.data_provenance || "no_data",
     connectivity_status: connectivity,
     stale_after_seconds: staleSeconds(),
   };

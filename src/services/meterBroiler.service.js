@@ -53,7 +53,7 @@ async function create(user, data) {
     const coop = await access.requireCoop(
       user,
       existing.coop_id,
-      "manage",
+      "owner",
       connection,
     );
     const device = await devices.lockById(data.device_id, connection);
@@ -83,7 +83,7 @@ async function update(user, id, data) {
     const coop = await access.requireCoop(
       user,
       existingDevice.coop_id,
-      "manage",
+      "owner",
       connection,
     );
     const device = await devices.lockById(existing.device_id, connection);
